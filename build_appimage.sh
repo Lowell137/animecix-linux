@@ -57,7 +57,7 @@ VERSION=$(grep -m1 '^version =' Cargo.toml | cut -d '"' -f2)
 # Otomatik GitHub Release: GITHUB_TOKEN tanımlıysa AppImage'ı bir release olarak yayınlar.
 publish_release() {
   local token="${GITHUB_TOKEN:-}"
-  local repo="${GITHUB_REPO:-nyx47rd/animecix-app}"
+  local repo="${GITHUB_REPO:-veilzon/animecix-linux}"
   local asset="AnimeciX-x86_64.AppImage"
   if [ -z "$token" ]; then
     echo "==> GITHUB_TOKEN tanımlı değil, GitHub Release oluşturulmayacak (AppImage yerelde kaldı)."

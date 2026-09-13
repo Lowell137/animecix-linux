@@ -125,13 +125,8 @@ pub fn free_space(path: &Path) -> Option<u64> {
     (stat.f_bavail as u64).checked_mul(stat.f_frsize as u64)
 }
 
-fn build_client_for(url: &str) -> Result<reqwest::blocking::Client, String> {
-    let mut b = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30));
-    let local = url.starts_with("http://127.") || url.starts_with("http://localhost");
-    if !local && crate::vpn::port_alive() {
-        let proxy = format!("socks5h://127.0.0.1:{}", crate::vpn::PROXY_PORT);
-        b = b.proxy(reqwest::Proxy::all(&proxy).map_err(|e| e.to_string())?);
-    }
+fn build_client_for(_url: &str) -> Result<reqwest::blocking::Client, String> {
+    let b = reqwest::blocking::Client::builder().timeout(std::time::Duration::from_secs(30));
     b.build().map_err(|e| e.to_string())
 }
 

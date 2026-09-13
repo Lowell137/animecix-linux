@@ -1,8 +1,8 @@
-# AnimeciX Linux 
+# AnimeciX Linux
 
-[![Web](https://img.shields.io/badge/Web-nyx47rd.github.io%2Fanimecix-0969da?style=flat-square)](https://nyx47rd.github.io/animecix/)
-[![Releases](https://img.shields.io/github/v/release/nyx47rd/animecix?style=flat-square)](https://github.com/nyx47rd/animecix/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/nyx47rd/animecix?style=flat-square)](LICENSE)
+[![Web](https://img.shields.io/badge/Web-veilzon.github.io%2Fanimecix--linux-0969da?style=flat-square)](https://veilzon.github.io/animecix-linux/)
+[![Releases](https://img.shields.io/github/v/release/veilzon/animecix-linux?style=flat-square)](https://github.com/veilzon/animecix-linux/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/veilzon/animecix-linux?style=flat-square)](LICENSE)
 
 <img src="assets/hicolor/256x256/apps/tr.com.animecix.png" align="right" width="96" height="96" alt="AnimeciX">
 
@@ -19,7 +19,7 @@ kontrol eder ve kendini otomatik güncelleyebilir.
 ## Özellikler
 
 - **İndirme yöneticisi**: bölüm ve film indirme; 6 bağlantıyla hızlı indirme, kaldığı yerden devam, toplu indirme sihirbazı
-- **Araçlar menüsü**: Favoriler, Maraton, Geçmiş, İndirilenler ve Ayarlar tek menüde; Ctrl+T ile anında erişim (kısayol değiştirilebilir)
+- **Sayfalar menüsü**: Ana Sayfa, Favoriler, Maraton, Geçmiş, İndirilenler ve Ayarlar tek menüde; Ctrl+T ile anında erişim (kısayol değiştirilebilir)
 - **5 koyu tema**: Koyu, Bordo, Orman, Lacivert, Mor; karşılama ekranında canlı önizleme
 - **Hızlı arama**: ana ekranda ortalı arama çubuğu (Ctrl+S); bölüm ekranında hızlı bölüm arama
 - **Oynatıcı**: MPV ile oynatma, otomatik tam ekran, resmi intro/outro atlama (S/E), çalan şarkı bilgisi ve Shift+M ile tarayıcıda açma, isteğe bağlı oynatma kalite seçici
@@ -28,9 +28,6 @@ kontrol eder ve kendini otomatik güncelleyebilir.
 - **Otomatik güncelleme**: AppImage sürümü başlatmada yeni sürümü denetler, tek tıkla günceller
 - **Kurulum sihirbazı**: bağımlılık kontrolü ve masaüstü başlatıcı kurulumu
 - **Ayarlar**: tema, kısayollar, indirme klasörü, masaüstü başlatıcı, veri sıfırlama
-- **VPN proxy desteği** (isteğe bağlı): yerelde çalışan bir proxy varsa
-  (`127.0.0.1:10808`, ör. sing-box + ProtonVPN WireGuard) video trafiğini oradan çıkarır ve
-  ISS kısıtlamalarını aşar; proxy kapalıysa uygulama normal çalışır, hiçbir şey bozulmaz
 - **Hızlı yükleme**: HTTP/2 multiplexing, bağlantı havuzu (keep-alive) ve DNS önbelleği;
   kapak görselleri paralel (12 worker) indirilir
 
@@ -66,7 +63,7 @@ kontrol eder ve kendini otomatik güncelleyebilir.
 
 ### AppImage (önerilen)
 
-1. [Releases](https://github.com/nyx47rd/animecix/releases) sayfasından `AnimeciX-x86_64.AppImage` dosyasını indirin.
+1. [Releases](https://github.com/veilzon/animecix-linux/releases) sayfasından `AnimeciX-x86_64.AppImage` dosyasını indirin.
 2. Çalıştırılabilir yapın ve açın:
 
    ```bash
@@ -88,8 +85,8 @@ Gerekli sistem bağımlılıkları:
 Rust (1.74+) kurulu olmalı:
 
 ```bash
-git clone https://github.com/nyx47rd/animecix.git
-cd animecix
+git clone https://github.com/veilzon/animecix-linux.git
+cd animecix-linux
 cargo build --release
 ./target/release/animecix
 ```
@@ -104,62 +101,6 @@ Uygulama bir **AppImage** olarak çalışıyorsa başlangıçta yeni sürümü k
   onay kutusu çıkar; “Güncelle ve Yeniden Başlat” deyince indirir, kurar ve uygulamayı yeniden başlatır.
 - **Elle:** *Ayarlar → Şimdi Güncelle* ile istediğin an kontrol edebilirsin.
 Kaynaktan derlenen sürümde otomatik güncelleme devre dışıdır.
-
----
-
-## İsteğe bağlı: Daha hızlı video (VPN proxy)
-
-> **Not:** VPN Proxy, Flatpak sürümünde bulunmaz (sandbox, host'ta süreç
-> başlatmaya izin vermez). AppImage ve AUR sürümlerinde kullanılabilir.
-
-ISS'n video trafiğini kısıtlıyorsa yerelde bir proxy çalıştırman yeterli: uygulama
-`127.0.0.1:10808` portunu görünce mpv video trafiğini **otomatik** oradan geçirir;
-proxy yoksa hiçbir şey değişmez.
-
-Kullanılan araç: [sing-box](https://github.com/SagerNet/sing-box) (root'suz, kullanıcı
-alanında çalışır) + [ProtonVPN](https://protonvpn.com) ücretsiz WireGuard config'i.
-
-### Kurulum (tek seferlik, ~2 dakika)
-
-1. **sing-box indir:** [GitHub Releases](https://github.com/SagerNet/sing-box/releases)
-   sayfasından **Linux x86_64** (`amd64`) `.tar.gz` dosyasını indir. Arşivi aç ve
-   binary'yi koy:
-   ```bash
-   mkdir -p ~/.local/share/singbox
-   tar xzf sing-box-*-linux-amd64.tar.gz
-   cp sing-box-*/sing-box ~/.local/share/singbox/
-   chmod +x ~/.local/share/singbox/sing-box
-   ```
-2. **ProtonVPN WireGuard config al:** protonvpn.com → Giriş → **Downloads** →
-   "WireGuard configuration" → platform **GNU/Linux** → ücretsiz ülke (ör. NL-FREE) →
-   indirilen `.conf` dosyasını şuraya kaydet:
-   ```bash
-   cp ~/İndirilenler/wireguard-config.conf ~/.local/share/singbox/config.json
-   ```
-   (Config dosya adı tam olarak `config.json` olmalı.)
-3. **Başlat:** Uygulamada **Ayarlar → VPN Proxy → Başlat**'a bas. Durum satırı
-   "Çalışıyor"a dönerse ve çıkan pencerede **Yeniden Başlat**'a basarsan API trafiği
-   (ana sayfa, arama) de tüneleden geçer — ISS engelleri tamamen aşılır. Yeniden
-   başlatmadan yalnızca video trafiği tüneleden geçer. (Terminal severler için elle
-   komut:
-   `~/.local/share/singbox/sing-box run -c ~/.local/share/singbox/config.json &`
-   — bu durumda da tünel açıldıktan sonra uygulamayı elle yeniden başlat.)
-
-### Doğrulama
-
-Durum satırı "Çalışıyor" gösteriyorsa mpv, videoları 127.0.0.1:10808 üzerinden
-çıkarır. Çıkış IP'ni kontrol etmek için:
-```bash
-curl -x socks5h://127.0.0.1:10808 https://www.gstatic.com/generate_204 -o /dev/null -w "%{http_code}\n"
-```
-`204` dönüyorsa tünel aktif demektir.
-
-### Notlar
-
-- Uygulama config'i şu sırayla arar: sing-box binary'sinin yanındaki `config.json`,
-  `~/.local/share/singbox/config.json`, `~/vpn-config.json`, `~/sing-box-config.json`.
-- Proxy'yi durdurmak için **Ayarlar → VPN Proxy → Durdur**.
-- Proxy kapatılırsa uygulama normal bağlantıya döner; hiçbir ayarın bozulmaz.
 
 ---
 
@@ -186,7 +127,7 @@ bash build_appimage.sh
 |---|---|
 | `/` | Bölüm ekranında hızlı bölüm arama |
 | `Ctrl+S` | Ana ekranda arama çubuğuna odaklan |
-| `Ctrl+T` | Araçlar menüsünü aç/kapat |
+| `Ctrl+T` | Sayfalar menüsünü aç/kapat |
 | `s` | Oynatıcıda intro sonuna atla |
 | `e` | Oynatıcıda outro sonuna atla |
 | `Shift+M` (`M`) | Çalan şarkıyı tarayıcıda aç (şarkı bilgisi varsa) |
@@ -244,4 +185,4 @@ Video açılmadan önce çözülür; sonuç 6 saat önbelleğe alınır.
 
 ## Lisans
 
-[MIT](LICENSE) © 2026 nyx47rd
+[MIT](LICENSE) © 2026 veilzon

@@ -70,7 +70,7 @@ pub enum Msg {
 pub struct App {
     pub window: adw::ApplicationWindow,
     pub stack: gtk::Stack,
-    pub float_back: gtk::Button,
+    pub back_btn: gtk::Button,
     pub tools_menu: Rc<RefCell<Option<crate::ui::tools_menu::ToolsMenu>>>,
     pub search_toggle_btn: gtk::Button,
     pub title_label: gtk::Label,
@@ -93,6 +93,8 @@ pub struct App {
     pub loading_gen: Rc<Cell<u32>>,
     pub home_acts: Rc<RefCell<Vec<Option<usize>>>>,
     pub dl_manager: crate::download::DownloadManager,
+    /// Bölüm hızlı-arama tuşu: sayfa başına tek controller (birikmeyi önler).
+    pub ep_search_controller: Rc<RefCell<Option<gtk::EventControllerKey>>>,
 }
 
 /// Geri-dönüş geçiş bayrağı (switch içinde tüketilir).
@@ -195,12 +197,18 @@ impl App {
         title_label.set_max_width_chars(28);
         header.set_title_widget(Some(&title_label));
 
+        let back_btn = gtk::Button::with_label("‹ Geri");
+        back_btn.add_css_class("flat");
+        back_btn.set_tooltip_text(Some("Geri"));
+        back_btn.set_visible(false);
+        header.pack_start(&back_btn);
+
         let search_toggle_btn = gtk::Button::from_icon_name("system-search-symbolic");
         search_toggle_btn.add_css_class("flat");
         search_toggle_btn.add_css_class("circular");
         search_toggle_btn.set_tooltip_text(Some("Arama Yap"));
         header.pack_end(&search_toggle_btn);
-        // Araçlar butonu App::new sonunda (goto kablosu Rc gerektirir) eklenir.
+        // Sayfalar butonu App::new sonunda (goto kablosu Rc gerektirir) eklenir.
 
         let search_entry = gtk::SearchEntry::new();
         search_entry.set_placeholder_text(Some("Anime, dizi veya film ara…"));
@@ -239,17 +247,6 @@ impl App {
         let overlay = gtk::Overlay::new();
         overlay.set_child(Some(&main_stack));
         overlay.add_overlay(&loading);
-
-        // Yüzen geri butonu: canvas içinde sağ üst, her zaman en üst katman.
-        let float_back = gtk::Button::from_icon_name("go-previous-symbolic");
-        float_back.add_css_class("tools-back-float");
-        float_back.set_tooltip_text(Some("Geri"));
-        float_back.set_halign(gtk::Align::Start);
-        float_back.set_valign(gtk::Align::Start);
-        float_back.set_margin_top(16);
-        float_back.set_margin_start(16);
-        float_back.set_visible(false);
-        overlay.add_overlay(&float_back);
         overlay.set_vexpand(true);
         overlay.set_hexpand(true);
 
@@ -282,7 +279,7 @@ impl App {
         let app_inst = Rc::new(Self {
             window,
             stack: main_stack,
-            float_back,
+            back_btn,
             tools_menu: Rc::new(RefCell::new(None)),
             search_toggle_btn,
             title_label,
@@ -305,16 +302,18 @@ impl App {
             loading_gen: Rc::new(Cell::new(0)),
             home_acts: Rc::new(RefCell::new(Vec::new())),
             dl_manager,
+            ep_search_controller: Rc::new(RefCell::new(None)),
         });
         {
-            // Araçlar menüsü: goto kablosu Rc gerektirdiği için burada kurulur.
+            // Sayfalar menüsü: goto kablosu Rc gerektirdiği için burada kurulur.
             let inst = app_inst.clone_ref();
             let goto: Rc<dyn Fn(usize)> = Rc::new(move |i| {
                 let target = match i {
-                    0 => Page::Favs,
-                    1 => Page::Marathon,
-                    2 => Page::History,
-                    3 => Page::Downloads,
+                    0 => Page::Home,
+                    1 => Page::Favs,
+                    2 => Page::Marathon,
+                    3 => Page::History,
+                    4 => Page::Downloads,
                     _ => Page::Settings,
                 };
                 let mut st = inst.page_history.borrow_mut();
@@ -323,6 +322,9 @@ impl App {
                 }
                 drop(st);
                 inst.show_page(&target);
+                if target == Page::Home {
+                    inst.fetch_home();
+                }
             });
             let settings_c = app_inst.settings.clone();
             let shortcut_label: Rc<dyn Fn() -> String> =
@@ -422,7 +424,7 @@ impl App {
         Rc::new(Self {
             window: self.window.clone(),
             stack: self.stack.clone(),
-            float_back: self.float_back.clone(),
+            back_btn: self.back_btn.clone(),
             tools_menu: self.tools_menu.clone(),
             search_toggle_btn: self.search_toggle_btn.clone(),
             title_label: self.title_label.clone(),
@@ -445,6 +447,7 @@ impl App {
             loading_gen: self.loading_gen.clone(),
             home_acts: self.home_acts.clone(),
             dl_manager: self.dl_manager.clone(),
+            ep_search_controller: self.ep_search_controller.clone(),
         })
     }
 
@@ -469,7 +472,7 @@ impl App {
         });
 
         let this = self.clone_ref();
-        self.float_back.connect_clicked(move |_| {
+        self.back_btn.connect_clicked(move |_| {
             this.go_back();
         });
 
@@ -508,7 +511,7 @@ impl App {
                     }
                     glib::Propagation::Stop
                 } else {
-                    // Araçlar kısayolu (ayarlanabilir; çıplak T metin alanında yutulur).
+                    // Sayfalar kısayolu (ayarlanabilir; çıplak T metin alanında yutulur).
                     let tsc = settings.borrow().tools_shortcut.clone();
                     let is_alt = state.contains(gtk::gdk::ModifierType::ALT_MASK);
                     let editable = gtk::prelude::GtkWindowExt::focus(&window_c)
@@ -684,7 +687,7 @@ impl App {
     pub fn show_page(&self, page: &Page) {
         use gtk::prelude::IsA;
         self.progress_bars.borrow_mut().clear();
-        self.float_back
+        self.back_btn
             .set_visible(self.page_history.borrow().len() > 1);
 
         fn switch<T: IsA<gtk::Widget>>(
@@ -767,6 +770,34 @@ impl App {
                 switch(&self.stack, &page_name, gtk::StackTransitionType::SlideLeft, self.build_episodes_view(title, eps));
             }
         }
+
+        // Odak iadesi: PgUp/PgDn/ok tuşları odak ister, hover yetmez.
+        // Geçiş sonrası odak ölü widget/header'da kalırsa tuşlar boşa düşer.
+        let stack_c = self.stack.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(visible) = stack_c.visible_child() {
+                Self::focus_visible_scroll(&visible);
+            }
+        });
+    }
+
+    /// Görünür sayfadaki ilk kaydırma alanına odak verir.
+    /// Overlay sarmalayan sayfalarda (karşılama/bölüm/film) içe yürünür.
+    fn focus_visible_scroll(widget: &gtk::Widget) -> bool {
+        if let Some(sw) = widget.downcast_ref::<gtk::ScrolledWindow>() {
+            sw.set_can_focus(true);
+            sw.set_focusable(true);
+            sw.grab_focus();
+            return true;
+        }
+        let mut cur = widget.first_child();
+        while let Some(child) = cur {
+            if Self::focus_visible_scroll(&child) {
+                return true;
+            }
+            cur = child.next_sibling();
+        }
+        false
     }
 
     fn apply_goto_arg(&self) {
@@ -994,7 +1025,7 @@ impl App {
             main_box.append(&flow);
         }
 
-        scroll.set_child(Some(&main_box));
+        outer.append(&main_box);
         scroll
     }
 
@@ -1268,6 +1299,9 @@ impl App {
 
     fn build_settings_view(&self) -> gtk::ScrolledWindow {
         let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hexpand(true);
+        scroll.set_vexpand(true);
+        scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
         let settings = self.settings.borrow();
         let this_save = self.clone_ref();
         let this_wipe = self.clone_ref();
@@ -1688,7 +1722,12 @@ impl App {
                     glib::Propagation::Proceed
                 }
             });
-            self.window.add_controller(key_controller);
+            // Önceki sayfanın controller'ını kaldır (birikmeyi önle).
+            if let Some(old) = self.ep_search_controller.borrow().as_ref() {
+                self.window.remove_controller(old);
+            }
+            self.window.add_controller(key_controller.clone());
+            *self.ep_search_controller.borrow_mut() = Some(key_controller);
         }
         drop(settings);
 
@@ -2834,13 +2873,6 @@ impl App {
             let tid_c = title.id;
             let patience_c = self.client.load_settings().source_patience_secs.max(10);
             let total = candidates.len() + fallback_embeds_c.len();
-            let use_proxy = std::net::TcpStream::connect_timeout(
-                &"127.0.0.1:10808".parse().expect("statik adres"),
-                std::time::Duration::from_millis(300),
-            ).is_ok();
-            if use_proxy {
-                eprintln!("[SUP] yerel proxy aktif (127.0.0.1:10808), mpv oradan çıkacak");
-            }
             std::thread::spawn(move || {
                 'supervisor: for i in 0..total {
                     let url: String = if i < candidates.len() {
@@ -2910,9 +2942,6 @@ impl App {
                             "--http-header-fields=Referer: {}\nAccept: */*",
                             referer
                         ));
-                    }
-                    if use_proxy {
-                        cmd.arg("--http-proxy=http://127.0.0.1:10808");
                     }
                     eprintln!("[SUP] mpv spawn deneniyor (ep={}, kaynak={}, url={:.80})", episode, i, url);
                     let child = match cmd.spawn() {

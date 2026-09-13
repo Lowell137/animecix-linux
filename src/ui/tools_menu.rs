@@ -1,4 +1,4 @@
-//! Araçlar menüsü: sayfa kısayolları + animasyonlu popover + kendi CSS'i.
+//! Sayfalar menüsü: sayfa kısayolları + animasyonlu popover + kendi CSS'i.
 //! main.rs şişmesin diye stil bu modülün sağlayıcısındadır (covers.rs deseni).
 
 use gtk::prelude::*;
@@ -7,7 +7,8 @@ use std::rc::Rc;
 use std::sync::{Arc, OnceLock};
 
 /// Menüdeki sayfalar: (anahtar, görünen ad). Sıra popover gezinme sırasıdır.
-pub const TOOL_PAGES: [(&str, &str); 5] = [
+pub const TOOL_PAGES: [(&str, &str); 6] = [
+    ("home", "Ana Sayfa"),
     ("fav", "Favoriler"),
     ("marathon", "Maraton"),
     ("history", "Geçmiş"),
@@ -46,20 +47,6 @@ pub fn match_tools_shortcut(
 /// Modül CSS'i (kapsamlı seçiciler; genel sağlayıcıya dokunmaz).
 pub fn tools_menu_css() -> String {
     r#"
-                .tools-back-float {
-                    background-color: @accent_color;
-                    color: @accent_fg_color;
-                    border-radius: 9999px;
-                    min-width: 48px;
-                    min-height: 48px;
-                    box-shadow: 0 4px 18px alpha(black, 0.45);
-                    opacity: 0.45;
-                }
-                .tools-back-float:hover {
-                    opacity: 1.0;
-                    box-shadow: 0 0 18px 3px alpha(@accent_color, 0.55);
-                }
-
                 button.tools-header-btn {
                     border-radius: 20px;
                     padding: 4px 10px;
@@ -138,7 +125,24 @@ pub fn ensure_tools_css() {
     });
 }
 
-/// Animasyonlu Araçlar menüsü tutamacı (Clone edilebilir).
+/// İlk satıra odak verir (görsel seçim + klavye aktivasyonu birlikte).
+/// `select_row` tek başına boyar; `Enter` (row-activated) için satır odağı şart.
+/// popup() ile aynı tick'teki grab tutmayabildiği için idle'da denenir.
+fn focus_first_row(list: &gtk::ListBox) {
+    if let Some(first) = list.row_at_index(0) {
+        list.select_row(Some(&first));
+        let list_c = list.clone();
+        glib::idle_add_local_once(move || {
+            if first.is_visible() {
+                first.grab_focus();
+            } else {
+                list_c.grab_focus();
+            }
+        });
+    }
+}
+
+/// Animasyonlu Sayfalar menüsü tutamacı (Clone edilebilir).
 #[derive(Clone)]
 pub struct ToolsMenu {
     button: gtk::Button,
@@ -158,7 +162,7 @@ impl ToolsMenu {
         client: Arc<crate::api::Client>,
         shortcut_label: Rc<dyn Fn() -> String>,
     ) -> Self {
-        let button = gtk::Button::with_label("Araçlar");
+        let button = gtk::Button::with_label("Sayfalar");
         button.add_css_class("flat");
         button.add_css_class("tools-header-btn");
         button.set_tooltip_text(Some("Sayfalar menüsü (kısayol atanabilir)"));
@@ -232,12 +236,12 @@ impl ToolsMenu {
             });
         }
 
-        // Odak haritalamada alınır: popup() ile aynı tick'teki grab tutmaz
-        // (Reveal animasyonu), odak sayfada kalırsa PgUp/PgDn arkaya düşer.
+        // Odak haritalamada alınır: popup() ile aynı tick'teki grab tutmaz.
+        // Satıra odak verilir ki Enter direkt çalışsın (seçim yetmez).
         {
             let list_c = list.clone();
             popover.connect_map(move |_| {
-                list_c.grab_focus();
+                focus_first_row(&list_c);
             });
         }
 
@@ -272,14 +276,11 @@ impl ToolsMenu {
         self.popover.popup();
         self.reveal.set_visible(true);
         self.reveal.set_reveal_child(true);
-        if let Some(first) = self.list.row_at_index(0) {
-            self.list.select_row(Some(&first));
-        }
-        self.list.grab_focus();
+        focus_first_row(&self.list);
         if !client.is_tools_tip_seen() {
             client.set_tools_tip_seen(true);
             let t = adw::Toast::new(&format!(
-                "Araçlar: {} ile aç • Ok/PgUp-PgDn ile seç • Enter/tık ile aç",
+                "Sayfalar: {} ile aç • Ok ile seç • Enter/tık ile aç",
                 glib::markup_escape_text(&shortcut_label())
             ));
             t.set_timeout(15);
@@ -319,9 +320,10 @@ mod tests {
 
     #[test]
     fn tool_pages_count_and_order() {
-        assert_eq!(TOOL_PAGES.len(), 5);
-        assert_eq!(TOOL_PAGES[0].0, "fav");
-        assert_eq!(TOOL_PAGES[4].0, "settings");
+        assert_eq!(TOOL_PAGES.len(), 6);
+        assert_eq!(TOOL_PAGES[0].0, "home");
+        assert_eq!(TOOL_PAGES[1].0, "fav");
+        assert_eq!(TOOL_PAGES[5].0, "settings");
         for (_, name) in TOOL_PAGES {
             assert!(
                 name.chars().all(|c| c.is_alphanumeric() || c == ' '),
@@ -365,7 +367,6 @@ mod tests {
     fn css_contains_scoped_selectors() {
         let css = tools_menu_css();
         for sel in [
-            ".tools-back-float",
             ".tools-header-btn",
             "popover.tools-pop",
             "popover.tools-pop > contents",

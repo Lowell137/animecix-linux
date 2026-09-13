@@ -1,4 +1,4 @@
-app-id: io.github.nyx47rd.AnimeciX
+app-id: io.github.veilzon.AnimeciX
 runtime: org.gnome.Platform
 runtime-version: '50'
 sdk: org.gnome.Sdk
@@ -72,17 +72,6 @@ modules:
         tag: v0.36.0
         commit: f4210f84906c3b00a65fba198c8127b6757b9350
 
-  - name: aria2
-    buildsystem: autotools
-    config-opts:
-      - --disable-static
-      - --disable-bittorrent
-      - --disable-metalink
-    sources:
-      - type: archive
-        url: https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0.tar.xz
-        sha256: 60a420ad7085eb616cb6e2bdf0a7206d68ff3d37fb5a956dc44242eb2f79b66b
-
   - name: animecix
     buildsystem: simple
     build-options:
@@ -91,16 +80,18 @@ modules:
     build-commands:
       - cargo build --release --offline --locked
       - install -Dm755 target/release/animecix -t /app/bin
-      - install -Dm644 packaging/flatpak/io.github.nyx47rd.AnimeciX.desktop -t /app/share/applications/
-      - install -Dm644 packaging/flatpak/io.github.nyx47rd.AnimeciX.metainfo.xml -t /app/share/metainfo/
-      - install -Dm644 assets/icon-64.png /app/share/icons/hicolor/64x64/apps/io.github.nyx47rd.AnimeciX.png
-      - install -Dm644 assets/icon-128.png /app/share/icons/hicolor/128x128/apps/io.github.nyx47rd.AnimeciX.png
-      - install -Dm644 assets/icon-256.png /app/share/icons/hicolor/256x256/apps/io.github.nyx47rd.AnimeciX.png
-      - install -Dm644 assets/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.nyx47rd.AnimeciX.png
+      - install -Dm644 packaging/flatpak/io.github.veilzon.AnimeciX.desktop -t /app/share/applications/
+      - install -Dm644 packaging/flatpak/io.github.veilzon.AnimeciX.metainfo.xml -t /app/share/metainfo/
+      - install -Dm644 assets/icon-64.png /app/share/icons/hicolor/64x64/apps/io.github.veilzon.AnimeciX.png
+      - install -Dm644 assets/icon-128.png /app/share/icons/hicolor/128x128/apps/io.github.veilzon.AnimeciX.png
+      - install -Dm644 assets/icon-256.png /app/share/icons/hicolor/256x256/apps/io.github.veilzon.AnimeciX.png
+      - install -Dm644 assets/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.veilzon.AnimeciX.png
       - mkdir -p /app/share/animecix/assets
       - cp -r assets/upscale /app/share/animecix/assets/
       - chmod -R a-w /app/share/animecix/assets/upscale
     sources:
-      - type: dir
-        path: ../..
+      - type: git
+        url: https://github.com/veilzon/animecix-linux.git
+        tag: v1.2.1
+
       - cargo-sources.json

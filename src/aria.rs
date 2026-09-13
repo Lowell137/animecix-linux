@@ -138,13 +138,6 @@ pub fn ensure_daemon() -> Result<(u16, String), String> {
     }
     let bin = find_aria2c().ok_or_else(|| "aria2c bulunamadı".to_string())?;
     let secret = random_secret();
-    let mut proxy_args: Vec<String> = Vec::new();
-    if crate::vpn::port_alive() {
-        proxy_args.push(format!(
-            "--all-proxy=socks5h://127.0.0.1:{}",
-            crate::vpn::PROXY_PORT
-        ));
-    }
     for port in PORT_FIRST..=PORT_LAST {
         let mut cmd = Command::new(&bin);
         cmd.args([
@@ -160,9 +153,6 @@ pub fn ensure_daemon() -> Result<(u16, String), String> {
             "--console-log-level=warn",
             "--quiet=true",
         ]);
-        for a in &proxy_args {
-            cmd.arg(a);
-        }
         cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
         let child = match cmd.spawn() {
             Ok(c) => c,

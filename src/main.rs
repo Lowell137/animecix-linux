@@ -13,7 +13,6 @@ mod skip;
 mod theme;
 mod ui;
 mod update;
-mod vpn;
 
 use app::App;
 use adw::prelude::*;

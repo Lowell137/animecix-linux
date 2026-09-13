@@ -5,20 +5,6 @@ use std::cell::RefCell;
 use crate::api::{Client, HistoryEntry, Settings, Title, marathon_summary};
 use crate::ui::episodes_view;
 
-pub(crate) fn show_info_dialog(parent: Option<&gtk::Window>, heading: &str, body: &str) {
-    let dialog = adw::MessageDialog::builder()
-        .heading(heading)
-        .body(body)
-        .close_response("ok")
-        .default_response("ok")
-        .build();
-    if let Some(win) = parent {
-        dialog.set_transient_for(Some(win));
-    }
-    dialog.add_response("ok", "Tamam");
-    dialog.present();
-}
-
 pub struct MarathonView;
 
 impl MarathonView {
@@ -489,11 +475,11 @@ impl SettingsView {
         root.append(&search_group);
 
         let tools_group = adw::PreferencesGroup::new();
-        tools_group.set_title("Araçlar Menüsü Kısayolu");
+        tools_group.set_title("Sayfalar Menüsü Kısayolu");
 
         let tools_sc_row = adw::ComboRow::new();
         tools_sc_row.set_title("Kısayol Tuşu");
-        tools_sc_row.set_subtitle("Araçlar menüsünü açacak klavye kısayolu (çıplak T metin alanında çalışmaz)");
+        tools_sc_row.set_subtitle("Sayfalar menüsünü açacak klavye kısayolu (çıplak T metin alanında çalışmaz)");
         let tools_sc_model =
             gtk::StringList::new(&crate::ui::tools_menu::TOOL_SHORTCUT_OPTIONS);
         tools_sc_row.set_model(Some(&tools_sc_model));
@@ -585,138 +571,6 @@ impl SettingsView {
         patience_row.add_suffix(&patience_spin);
         perf_group.add(&patience_row);
         root.append(&perf_group);
-
-        if !crate::vpn::in_flatpak() {
-        let vpn_group = adw::PreferencesGroup::new();
-        vpn_group.set_title("VPN Proxy (İsteğe Bağlı)");
-
-        let info_btn = gtk::Button::from_icon_name("dialog-information");
-        info_btn.add_css_class("flat");
-        info_btn.add_css_class("circular");
-        info_btn.set_tooltip_text(Some("VPN Proxy ne işe yarar? Tıkla, detaylı açıkla."));
-        info_btn.set_valign(gtk::Align::Center);
-        {
-            let info_btn = info_btn.clone();
-            info_btn.connect_clicked(move |btn| {
-                let parent = btn.root().and_downcast::<gtk::Window>();
-                show_info_dialog(
-                    parent.as_ref(),
-                    "VPN Proxy nedir?",
-                    "ISS'n (internet sağlayıcı) video trafiğini yavaşlatıp kısıtlıyorsa buradan \
-yerel bir proxy (sing-box + ProtonVPN WireGuard) çalıştırabilirsin.\n\n\
-• Proxy ayakta olduğunda video trafiği otomatik olarak \
-127.0.0.1:10808 üzerinden çıkar; root (yönetici) izni gerekmez.\n\
-• Başlattıktan sonra çıkan pencerede 'Yeniden Başlat' dersen ana sayfa/arama gibi \
-API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
-• Proxy kapalıyken hiçbir şey değişmez, uygulama normal bağlantını kullanır.\n\
-• İlk kurulum için 'Başlat'a bas, adım adım rehber çıkar.\n\
-• Proxy kapatılırsa uygulama otomatik normal bağlantıya döner, hiçbir ayarın bozulmaz.",
-                );
-            });
-        }
-        vpn_group.set_header_suffix(Some(&info_btn));
-
-        let vpn_status_row = adw::ActionRow::new();
-        vpn_status_row.set_title("Durum");
-        vpn_status_row.set_subtitle("Yerel proxy (127.0.0.1:10808) üzerinden ISS kısıtlamalarını aşar");
-        let refresh_vpn_status = {
-            let row = vpn_status_row.clone();
-            move || {
-                if crate::vpn::port_alive() {
-                    row.set_subtitle("Çalışıyor — video trafiği 127.0.0.1:10808 üzerinden çıkıyor");
-                    row.remove_css_class("dim-label");
-                } else {
-                    row.set_subtitle("Kapalı — uygulama normal bağlantıyı kullanır");
-                    row.add_css_class("dim-label");
-                }
-            }
-        };
-        refresh_vpn_status();
-        vpn_group.add(&vpn_status_row);
-        root.append(&vpn_group);
-
-        let btn_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let start_btn = gtk::Button::with_label("Başlat");
-        start_btn.add_css_class("suggested-action");
-        start_btn.add_css_class("pill");
-        let stop_btn = gtk::Button::with_label("Durdur");
-        stop_btn.add_css_class("pill");
-        btn_box.append(&start_btn);
-        btn_box.append(&stop_btn);
-        let vpn_btn_row = adw::ActionRow::new();
-        vpn_btn_row.set_title("sing-box (WireGuard → SOCKS köprüsü)");
-        vpn_btn_row.set_subtitle("ProtonVPN ücretsiz hesapla çalışır; kurulum için Başlat'a bas");
-        vpn_btn_row.add_suffix(&btn_box);
-        vpn_group.add(&vpn_btn_row);
-
-        let refresh_status_rc = std::rc::Rc::new(refresh_vpn_status);
-
-        let live_rs = refresh_status_rc.clone();
-        glib::timeout_add_seconds_local(2, move || {
-            live_rs();
-            glib::ControlFlow::Continue
-        });
-
-        let rs = refresh_status_rc.clone();
-        start_btn.connect_clicked(move |btn| {
-            let parent = btn.root().and_downcast::<gtk::Window>();
-            let rs = rs.clone();
-            glib::spawn_future_local(async move {
-                match crate::vpn::detect() {
-                    None => {
-                        show_info_dialog(parent.as_ref(), "VPN Proxy Kurulumu", &crate::vpn::setup_instructions());
-                        rs();
-                    }
-                    Some((bin, cfg)) => {
-                        let res = {
-                            let bin = bin.clone();
-                            let cfg = cfg.clone();
-                            gio::spawn_blocking(move || crate::vpn::start(&bin, &cfg)).await
-                        };
-                        match res {
-                            Ok(Ok(())) => {
-                                let dlg = adw::MessageDialog::builder()
-                                    .heading("VPN Proxy başlatıldı")
-                                    .body("Video trafiği artık tünel üzerinden çıkıyor.\nAPI isteklerinin (ana sayfa, arama) de tüneleden geçmesi için uygulamayı yeniden başlat.")
-                                    .close_response("later")
-                                    .build();
-                                dlg.add_response("later", "Sonra");
-                                dlg.add_response("restart", "Yeniden Başlat 🔄");
-                                dlg.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
-                                if let Some(w) = parent.as_ref() {
-                                    dlg.set_transient_for(Some(w));
-                                }
-                                dlg.connect_response(None, move |_, resp| {
-                                    if resp == "restart" {
-                                        crate::restart_app();
-                                    }
-                                });
-                                dlg.present();
-                            }
-                            Ok(Err(e)) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", &format!("{e}\n\nLog dosyası: {}", crate::vpn::log_path().display())),
-                            Err(_) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", "Proxy başlatılırken beklenmeyen bir hata oluştu (süreç çökmüş olabilir)."),
-                        }
-                        rs();
-                    }
-                }
-            });
-        });
-
-        let rs2 = refresh_status_rc.clone();
-        stop_btn.connect_clicked(move |btn| {
-            let parent = btn.root().and_downcast::<gtk::Window>();
-            let rs2 = rs2.clone();
-            glib::spawn_future_local(async move {
-                let killed = gio::spawn_blocking(|| crate::vpn::stop()).await;
-                match killed {
-                    Ok(true) => {}
-                    Ok(false) => show_info_dialog(parent.as_ref(), "VPN Proxy", "Çalışan sing-box süreci bulunamadı."),
-                    Err(_) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", "Proxy durdurulurken beklenmeyen bir hata oluştu."),
-                }
-                rs2();
-            });
-        });
-        }
 
         let img_group = adw::PreferencesGroup::new();
         img_group.set_title("Görüntü İyileştirme");
@@ -1040,7 +894,7 @@ API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
 
         let gh_row = adw::ActionRow::new();
         gh_row.set_title("GitHub");
-        gh_row.set_subtitle("https://github.com/nyx47rd/animecix");
+        gh_row.set_subtitle("https://github.com/veilzon/animecix-linux");
         let gh_icon = crate::ui::brand_icons::github_image(16);
         gh_row.add_prefix(&gh_icon);
         let gh_btn = gtk::Button::with_label("Aç");
@@ -1048,7 +902,7 @@ API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
         gh_btn.add_css_class("pill");
         gh_btn.set_valign(gtk::Align::Center);
         gh_btn.connect_clicked(|_| {
-            let url = "https://github.com/nyx47rd/animecix";
+            let url = "https://github.com/veilzon/animecix-linux";
             let ok = std::process::Command::new("xdg-open")
                 .arg(url)
                 .spawn()

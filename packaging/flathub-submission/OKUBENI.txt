@@ -2,7 +2,7 @@ FLATHUB GÖNDERİM ADIMLARI (senin GitHub hesabınla, ~10 dakika)
 ================================================================
 
 Bu klasördeki TEK dosya Flathub deposunun KÖKÜNE gider:
-  - io.github.nyx47rd.AnimeciX.yml   (manifest, kaynak=git tag v2.9.4;
+  - io.github.veilzon.AnimeciX.yml   (manifest, kaynak=git tag v1.2.1;
     cargo vendor kaynaklari manifest icinden upstream tag'den cekilir)
 
 1) https://github.com/flathub/flathub sayfasına git -> Fork
@@ -17,12 +17,12 @@ Bu klasördeki TEK dosya Flathub deposunun KÖKÜNE gider:
      cp ~/animecix-app/packaging/flathub-submission/* .
 
 4) Commit + push:
-     git add io.github.nyx47rd.AnimeciX.yml cargo-sources.json
-     git commit -m "Add io.github.nyx47rd.AnimeciX"
+     git add io.github.veilzon.AnimeciX.yml cargo-sources.json
+     git commit -m "Add io.github.veilzon.AnimeciX"
      git push -u origin animecix-submission
 
 5) GitHub'da PR aç: base = flathub/new-pr , compare = <sen>/animecix-submission
-   Başlık: Add io.github.nyx47rd.AnimeciX
+   Başlık: Add io.github.veilzon.AnimeciX
    (PR şablonunu SİLME; soruları kısa doldur. AI ile yazılmış uzun metin ekleme.)
 
 6) Otomatik kontroller geçince PR'a yorum yaz:
@@ -35,7 +35,7 @@ Bu klasördeki TEK dosya Flathub deposunun KÖKÜNE gider:
    2FA açık olmalı).
 
 8) Doğrulama (doğrulanmış geliştirici rozeti): repo'nda dosya ekle:
-     .well-known/org.flathub.VerifiedApps.txt  ->  içine "io.github.nyx47rd.AnimeciX"
+     .well-known/org.flathub.VerifiedApps.txt  ->  içine "io.github.veilzon.AnimeciX"
 
 SONRAKİ SÜRÜMLER: inceleme YOK. Kendi flathub/<app-id> deponda
 manifest'teki tag/commit'i güncelleyip push -> otomatik derlenir.

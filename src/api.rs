@@ -492,7 +492,7 @@ pub fn sign_most_sought_slug(secret: &str, slug: &str) -> String {
 /// Resmi intro sırrı kasası: sunucudaki şifreli blob'un adresi.
 /// Blob herkese açıktır ama şifrelidir: {"v":1,"nonce":"<24 hex>","ct":"<hex>"}.
 pub const SKIP_VAULT_URL: &str =
-    "https://raw.githubusercontent.com/nyx47rd/animecix/main/docs/skip-vault.json";
+    "https://raw.githubusercontent.com/veilzon/animecix-linux/main/docs/skip-vault.json";
 
 /// Derleme anında gömülen kasa anahtarı (ANIMECIX_VAULT_KEY, 64 hex).
 /// Tanımlı değilse kasa kapalıdır; el girdisi yine çalışır.
@@ -811,12 +811,7 @@ pub fn check_internet() -> InternetStatus {
 
 impl Client {
     pub fn new() -> Self {
-        let proxy = if crate::vpn::port_alive() {
-            Some(format!("socks5h://127.0.0.1:{}", crate::vpn::PROXY_PORT))
-        } else {
-            None
-        };
-        let http = crate::http::Http::new(proxy.as_deref())
+        let http = crate::http::Http::new(None)
             .unwrap_or_else(|e| panic!("HTTP istemcisi baslatilamadi: {e}"));
 
         let cache_dir = {

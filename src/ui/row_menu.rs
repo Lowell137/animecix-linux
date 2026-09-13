@@ -153,7 +153,7 @@ impl RowMenu {
         {
             let list_c = list.clone();
             popover.connect_map(move |_| {
-                list_c.grab_focus();
+                focus_first_row(&list_c);
             });
         }
 
@@ -173,6 +173,30 @@ impl RowMenu {
         self.popover.popup();
         self.reveal.set_visible(true);
         self.reveal.set_reveal_child(true);
+        if let Some(list) = self
+            .reveal
+            .child()
+            .and_downcast::<gtk::ListBox>()
+        {
+            focus_first_row(&list);
+        }
+    }
+}
+
+/// İlk satıra odak verir: `Enter` (row-activated) için satır odağı şart,
+/// `select_row` tek başına boyar. popup() aynı-tick grab tutmayabilir,
+// idle'da dene.
+fn focus_first_row(list: &gtk::ListBox) {
+    if let Some(first) = list.row_at_index(0) {
+        list.select_row(Some(&first));
+        let list_c = list.clone();
+        glib::idle_add_local_once(move || {
+            if first.is_visible() {
+                first.grab_focus();
+            } else {
+                list_c.grab_focus();
+            }
+        });
     }
 }
 
