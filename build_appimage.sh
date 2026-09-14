@@ -4,7 +4,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-echo "==> AnimeciX AppImage Oluşturuluyor..."
+# CPU uyumluluğu: eski donanımda (AVX512 yok) SIGILL yememek için
+# Rust + C/ASM bağımlılıklarının tamamını x86-64-v2 ile derle.
+export CFLAGS="-march=x86-64-v2 -O2"
+export CXXFLAGS="-march=x86-64-v2 -O2"
+# Rust zaten Cargo.toml'da v2 garantiye al; env override sağlamlaştırır:
+export RUSTFLAGS="-C target-cpu=x86-64-v2"
 
 # 0. Sürüm numarası:
 #    - VERSION_BUMP=patch|minor|major env ile (default: patch, +0.0.1)

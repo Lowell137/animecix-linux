@@ -1,100 +1,69 @@
 # AnimeciX
 
-[![Web](https://img.shields.io/badge/Web-lowell137.github.io%2Fanimecix-0969da?style=flat-square)](https://lowell137.github.io/animecix/)
-[![Releases](https://img.shields.io/github/v/release/Lowell137/animecix-linux?style=flat-square)](https://github.com/Lowell137/animecix-linux/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
+[![Sürümler](https://img.shields.io/github/v/release/Lowell137/animecix-linux?style=flat-square)](https://github.com/Lowell137/animecix-linux/releases/latest)
+[![Lisans: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
 
 <img src="assets/hicolor/256x256/apps/tr.com.animecix.png" align="right" width="96" height="96" alt="AnimeciX">
 
-**Linux için GTK4/libadwaita ile yazılmış anime, dizi ve film izleme masaüstü istemcisi.**
+GTK4 ile yazılmış anime, dizi ve film istemcisi. Bu depo, orijinal projeden ayrılmış bir çataldır ve doğrudan buradan geliştirilir.
 
-Tek dosyalık taşınabilir **AppImage** olarak dağıtılır; uygulama başlatmada yeni sürümü
-kontrol eder ve kendini otomatik güncelleyebilir.
+Bu çatala eklenenler:
 
-> ⚠️ Bu uygulama **gayriresmî** ve eğitim/kişisel kullanım amaçlıdır; herkese açık bir API
-> kullanır. Hizmet sağlayıcıya zarar vermeden, kendi sorumluluğunda kullanın.
+- Tekli ve toplu bölüm indirme (çevirmen seçimli, kuyruk takibi)
+- Ayarlar içinde sistem bağımlılık kontrolü: dağıtımı algılar, eksikleri tek komutla kurdurur
+- Kart düzeni, hover davranışı ve oynatıcı başlatma düzeltmeleri
+- Eski işlemcilerde çalışması için x86-64-v2 hedefli derleme
 
----
+Tek dosyalık taşınabilir AppImage olarak dağıtılır. Açılışta yeni sürümü kontrol edip kendini güncelleyebilir. AppImage x86-64-v2 için derlenir, AVX512 gerektirmez.
 
-## Özellikler
+> Resmî olmayan bir istemcidir, herkese açık API kullanır. Kendi sorumluluğunda kullan.
 
-- 🏠 **Ana Sayfa**: kategorilere göre anime/dizi/film listeleri
-- 🔎 **Arama**: ana ekranda kısayol tuşu ile hızlı arama; bölüm ekranında hızlı bölüm arama
-- ▶️ **Oynatıcı**: MPV ile oynatma, 2 dakikalık önbellek, otomatik tam ekran, **AniSkip** intro/outro atlama
-- ⭐ **Favoriler**: beğendiğin başlıkları koleksiyonuna ekle
-- 🏃 **Maraton**: izleme listesi — sürükle-bırak ile sıralama ve bölüm ilerleme takibi
-- 🕘 **Geçmiş**: izlediğin bölümlerin geçmişi
-- ⚙️ **Ayarlar**: masaüstü başlatıcı entegrasyonu, veri sıfırlama, kısayollar
-- 📦 **Kurulum Sihirbazı**: bağımlılık kontrolü ve masaüstü menüsüne kurulum
-- 🔄 **Otomatik Güncelleme**: AppImage sürümünde başlatmada kendini güncelleyebilir
-- 🎯 **Akıllı kaynak seçimi**: tüm kaynaklar paralel çözülür, en kalitelisi (dosya boyutuna göre) seçilir;
-  ölü/pasif kaynaklar elenir, açılmayan kaynağa denk gelirse sonraki kaynağa kendiliğinden geçer
-- 🛡️ **VPN proxy desteği** (isteğe bağlı): yerelde çalışan bir proxy varsa
-  (`127.0.0.1:10808`, ör. sing-box + ProtonVPN WireGuard) video trafiğini oradan çıkarır ve
-  ISS kısıtlamalarını aşar; proxy kapalıysa uygulama normal çalışır, hiçbir şey bozulmaz
-- ⚡ **Hızlı yükleme**: HTTP/2 multiplexing, bağlantı havuzu (keep-alive) ve DNS önbelleği;
-  kapak görselleri paralel (12 worker) indirilir
-
----
-
-## Ekran Görüntüleri
+## Ekran görüntüleri
 
 <div align="center">
 
 | | |
 |:---:|:---:|
 | <img src="screenshots/home.png" width="100%"> | <img src="screenshots/search.png" width="100%"> |
-| **🏠 Ana Sayfa** | **🔎 Keşfet** |
+| Ana Sayfa | Keşfet |
 | <img src="screenshots/episodes.png" width="100%"> | <img src="screenshots/player.png" width="100%"> |
-| **▶️ Bölüm Listesi** | **🎬 Oynatıcı** |
+| Bölüm listesi | Oynatıcı |
 | <img src="screenshots/favorites.png" width="100%"> | <img src="screenshots/history.png" width="100%"> |
-| **⭐ Favoriler** | **🕘 Geçmiş** |
+| Favoriler | Geçmiş |
 | <img src="screenshots/marathon.png" width="100%"> | <img src="screenshots/calendar.png" width="100%"> |
-| **🏃 Maraton** | **📅 Takvim** |
+| Maraton | Takvim |
 | <img src="screenshots/news.png" width="100%"> | <img src="screenshots/login.png" width="100%"> |
-| **📰 Haberler** | **🔐 Giriş** |
+| Haberler | Giriş |
 | <img src="screenshots/settings.png" width="100%"> | <img src="screenshots/welcome.png" width="100%"> |
-| **⚙️ Ayarlar** | **👋 Karşılama** |
+| Ayarlar | Karşılama |
 
 </div>
 
----
-
 ## Kurulum
-
-### Tek komutla kur (AppImage)
 
 ```bash
 curl -L https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage -o AnimeciX.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
 ```
 
-veya `wget` ile:
+wget ile:
 
 ```bash
 wget -O AnimeciX.AppImage https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
 ```
 
-### Manuel indirme
+Kurulum gerekmez, tek dosyadır. Masaüstü kısayolu için uygulama içinden Ayarlar bölümündeki başlatıcı kurma seçeneğini kullan.
 
-1. [Releases](https://github.com/Lowell137/animecix-linux/releases) sayfasından `AnimeciX-x86_64.AppImage` dosyasını indirin.
-2. Çalıştırılabilir yapın ve açın:
-   ```bash
-   chmod +x AnimeciX-x86_64.AppImage
-   ./AnimeciX-x86_64.AppImage
-   ```
+Video oynatmazsa önce Ayarlar içindeki Sistem Bağımlılıkları sayfasını aç. Dağıtımına göre eksik paketleri (mpv, gtk4, adwaita, gstreamer, ffmpeg) gösterir, tek düğmeyle terminal üzerinden kurdurur.
 
-AppImage tek dosyadır; taşınabilir, kurulum gerektirmez. İstersen masaüstü başlatıcısını
-uygulama içindeki **Ayarlar → Masaüstü Başlatıcısını Sistemime Kur** ile ekleyebilirsin.
+## Kaynaktan derleme
 
-### Kaynaktan derleme
+Gerekli paketler:
 
-Gerekli sistem bağımlılıkları:
+- Debian/Ubuntu: `sudo apt install libgtk-4-dev libadwaita-1-dev mpv pkg-config`
+- Fedora: `sudo dnf install gtk4-devel libadwaita-devel mpv pkgconf-pkg-config`
+- Arch: `sudo pacman -S gtk4 libadwaita mpv pkgconf`
 
-- **Debian/Ubuntu:** `sudo apt install libgtk-4-dev libadwaita-1-dev mpv pkg-config`
-- **Fedora:** `sudo dnf install gtk4-devel libadwaita-devel mpv pkgconf-pkg-config`
-- **Arch:** `sudo pacman -S gtk4 libadwaita mpv pkgconf`
-
-Rust (1.74+) kurulu olmalı:
+Rust 1.74 ve üstü gerekir.
 
 ```bash
 git clone https://github.com/Lowell137/animecix-linux.git
@@ -103,170 +72,48 @@ cargo build --release
 ./target/release/animecix
 ```
 
----
+Eski işlemcilerde `Illegal instruction` almamak için derlemeden önce hedefi sabitle:
 
-## Güncelleme
-
-Uygulama bir **AppImage** olarak çalışıyorsa başlangıçta yeni sürümü kontrol eder:
-
-- **Otomatik:** *Ayarlar → Güncelleme → Otomatik Güncelleme* açıkken yeni sürüm bulunursa
-  onay kutusu çıkar; "Güncelle ve Yeniden Başlat" deyince indirir, kurar ve uygulamayı yeniden başlatır.
-- **Elle:** *Ayarlar → Şimdi Güncelle* ile istediğin an kontrol edebilirsin.
-
-Kaynaktan derlenen sürümde otomatik güncelleme devre dışıdır (sadece AppImage için geçerlidir).
-
----
-
-## İsteğe bağlı: Daha hızlı video (VPN proxy)
-
-> **Not:** VPN Proxy, Flatpak sürümünde bulunmaz (sandbox, host'ta süreç
-> başlatmaya izin vermez). AppImage ve AUR sürümlerinde kullanılabilir.
-
-ISS'n video trafiğini kısıtlıyorsa yerelde bir proxy çalıştırman yeterli: uygulama
-`127.0.0.1:10808` portunu görünce mpv video trafiğini **otomatik** oradan geçirir;
-proxy yoksa hiçbir şey değişmez (kırılmaz yapı).
-
-Kullanılan araç: [sing-box](https://github.com/SagerNet/sing-box) (root'suz, kullanıcı
-alanında çalışır) + [ProtonVPN](https://protonvpn.com) ücretsiz WireGuard config'i.
-
-### Kurulum (tek seferlik, ~2 dakika)
-
-1. **sing-box indir:** [GitHub Releases](https://github.com/SagerNet/sing-box/releases)
-   sayfasından **Linux x86_64** (`amd64`) `.tar.gz` dosyasını indir. Arşivi aç ve
-   binary'yi koy:
-   ```bash
-   mkdir -p ~/.local/share/singbox
-   tar xzf sing-box-*-linux-amd64.tar.gz
-   cp sing-box-*/sing-box ~/.local/share/singbox/
-   chmod +x ~/.local/share/singbox/sing-box
-   ```
-2. **ProtonVPN WireGuard config al:** protonvpn.com → Giriş → **Downloads** →
-   "WireGuard configuration" → platform **GNU/Linux** → ücretsiz ülke (ör. NL-FREE) →
-   indirilen `.conf` dosyasını şuraya kaydet:
-   ```bash
-   cp ~/İndirilenler/wireguard-config.conf ~/.local/share/singbox/config.json
-   ```
-   (Config dosya adı tam olarak `config.json` olmalı.)
-3. **Başlat:** Uygulamada **Ayarlar → VPN Proxy → Başlat**'a bas. Durum satırı
-   "Çalışıyor"a dönerse ve çıkan pencerede **Yeniden Başlat**'a basarsan API trafiği
-   (ana sayfa, arama) de tüneleden geçer — ISS engelleri tamamen aşılır. Yeniden
-   başlatmadan yalnızca video trafiği tüneleden geçer. (Terminal severler için elle
-   komut:
-   `~/.local/share/singbox/sing-box run -c ~/.local/share/singbox/config.json &`
-   — bu durumda da tünel açıldıktan sonra uygulamayı elle yeniden başlat.)
-
-### Doğrulama
-
-Durum satırı "Çalışıyor" gösteriyorsa mpv, videoları 127.0.0.1:10808 üzerinden
-çıkarır. Çıkış IP'ni kontrol etmek için:
 ```bash
-curl -x socks5h://127.0.0.1:10808 https://www.gstatic.com/generate_204 -o /dev/null -w "%{http_code}\n"
+export CFLAGS="-march=x86-64-v2 -O2"
+export CXXFLAGS="-march=x86-64-v2 -O2"
+export RUSTFLAGS="-C target-cpu=x86-64-v2"
 ```
-`204` dönüyorsa tünel aktif demektir.
 
-### Notlar
-
-- Uygulama config'i şu sırayla arar: sing-box binary'sinin yanındaki `config.json`,
-  `~/.local/share/singbox/config.json`, `~/vpn-config.json`, `~/sing-box-config.json`.
-- Proxy'yi durdurmak için **Ayarlar → VPN Proxy → Durdur**.
-- Proxy kapatılırsa uygulama normal bağlantıya döner; hiçbir ayarın bozulmaz.
-
----
-
-## Geliştiriciler için derleme & yayın
-
-AppImage üretmek ve GitHub Release oluşturmak için:
+`build_appimage.sh` bu değişkenleri kendisi ayarlar ve sürümü artırıp AppImage üretir. `GITHUB_TOKEN` tanımlıysa çıktıyı release olarak yükler:
 
 ```bash
-# GITHUB_TOKEN (repo için içerik/yayın yetkisi olan PAT) tanımlıysa
-# betik sürümü otomatik artırır, derler ve release olarak yayınlar:
 export GITHUB_TOKEN=ghp_xxxxxxxx
 bash build_appimage.sh
 ```
 
-`build_appimage.sh` her çalıştığında `Cargo.toml` sürümünü otomatik artırır, `cargo build --release`
-çalıştırır ve `GITHUB_TOKEN` tanımlıysa `AnimeciX-x86_64.AppImage` dosyasını
-`v<surum>` etiketli bir GitHub Release olarak yükler.
+## Güncelleme
 
----
+AppImage ile çalışıyorsa açılışta yeni sürümü kontrol eder. Ayarlar içindeki Otomatik Güncelleme açıksa onay sorup indirir, kurar ve yeniden başlatır. Dilersen aynı ekrandan elle denetleyebilirsin. Kaynaktan derlenen sürümde otomatik güncelleme kapalıdır.
 
-## Klavye Kısayolları
+## Kısayollar
 
 | Kısayol | İşlev |
 |---|---|
-| `/` | Bölüm ekranında hızlı bölüm arama |
-| `Ctrl+S` | Ana ekranda arama çubuğunu aç |
-| `s` | Oynatıcıda AniSkip ile intro sonuna atla |
-| `e` | Oynatıcıda AniSkip ile outro sonuna atla |
-| `Esc` | Geri / aramayı kapat |
+| `/` | Bölüm listesinde hızlı arama |
+| `Ctrl+S` | Ana ekranda arama açma |
+| `s` | İntro sonuna atlama |
+| `e` | Outro sonuna atlama |
+| `Esc` | Geri |
 
-Kısayollar *Ayarlar* ekranından değiştirilebilir.
+Kısayollar Ayarlar ekranından değişir.
 
----
+## Veriler
 
-## Yapılandırma & Veri
-
-Tüm veriler (geçmiş, ayarlar, kapak önbelleği) şurada tutulur:
+Ayarlar, geçmiş ve kapak önbelleği burada tutulur:
 
 ```
 ~/.local/share/animecix/
 ~/.cache/animecix/
 ```
 
-*Ayarlardan* "Tüm Verileri Sıfırla ve Temizle" ile sıfırlanabilir.
-
----
-
-## Performans
-
-Uygulama, ağ gecikmesini azaltmak için aşağıdaki teknikleri kullanır:
-
-- **HTTP/2 multiplexing**: Tek TCP/TLS bağlantısı üzerinden çoklu eşzamanlı akış; özellikle
-  ana sayfadaki onlarca kapak görselini sıraya sokmadan paralel getirir.
-- **Bağlantı havuzu & keep-alive**: Boşta bağlantılar 60sn boyunca sıcak tutulur
-  (`pool_idle_timeout`), böylece her istekte tekrar TLS/DNS el sıkışması yapılmaz.
-- **DNS önbelleği** (`hickory-dns`): Çözümlenen adresler saklanır, tekrarlı `getaddrinfo`
-  engellenir.
-- **Brotli sıkıştırma**: JSON yanıtları `br` ile sıkıştırılarak aktarılır.
-- **Paralel kapak indirme**: 12 worker ile kapaklar eşzamanlı çekilir (diskte 7 gün önbellekli).
-- **Stale-while-revalidate API önbelleği**: Süresi dolmuş veri anında gösterilir, arka planda
-  tazelenir; çevrimdışıyken bile eski veri kullanılır.
-
-> Geliştiriciler: `ANIMECIX_BENCH=1 ./target/release/animecix` ile her isteğin süresini
-> stderr'a loglayabilir (davranışı etkilemez).
-
----
-
-## AniSkip Entegrasyonu
-
-**AnimeciX**, intro ve outro'ları otomatik atlamak için topluluk tarafından işletilen
-**[aniskip-mirror](https://github.com/Lowell137/aniskip-mirror)** API'sini kullanır.
-Orijinal `api.aniskip.com` servisi 2026'da kullanım dışı kalmıştır (alan adı
-süresi dolmuş, GitHub deposu kaldırılmış), bu yüzden aynı JSON şemasına birebir
-uyumlu kendi mirror altyapımız kullanılır.
-
-**Endpoint'ler** (otomatik failover):
-
-1. **Birincil**: `https://aniskip-mirror-cf.yasar-123-sevda.workers.dev` — Cloudflare Worker
-   (R2 depolama, edge cache, 75.000+ anime verisi)
-2. **Yedek**: `https://aniskip-mirror.vercel.app`
-
-Birincil endpoint 5xx veya timeout dönerse uygulama saydam biçimde yedek'e geçer.
-404 (bölüm verisi yok) her iki endpoint için geçerli yanıt sayılır ve 6 saat
-önbelleğe alınır; sürekli denenmez.
-
-**Davranış**:
-- Bir bölüm başlatıldığında, MPV supervisor thread'i her 250 ms'de `time-pos` okur
-- Pencere AniSkip verisinde tanımlı OP/ED aralığına girdiğinde, MPV'ye `set_property time-pos` ile otomatik seek
-- Atlandığında MPV OSD'de 3 sn `⏩ İntro Atlandı (AniSkip: 0:28 → 1:58)` bildirimi + uygulama toast'ı
-- Ayarlardan kapatılabilir; kapatıldığında `s` / `e` tuşlarıyla manuel atlama hâlâ çalışır
-
-**Şema uyumluluğu**: API, orijinal `aniskip.com` v1 (snake_case) ve v2 (camelCase)
-yanıt yapılarını birebir döndürür. Mevcut istemciler hiçbir değişiklik olmadan
-çalışmaya devam eder.
-
----
+Ayarlar içindeki sıfırlama seçeneğiyle temizlenebilir.
 
 ## Lisans
 
-[MIT](LICENSE) © 2026 Lowell137
+[MIT](LICENSE)
