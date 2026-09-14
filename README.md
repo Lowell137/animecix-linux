@@ -8,11 +8,10 @@ Bu Fork AI ile yapılmıştır
 GTK4 ile yazılmış anime, dizi ve film istemcisi. Bu depo, orijinal projeden ayrılmış bir çataldır ve doğrudan buradan geliştirilir.
 
 Bu çatala eklenenler:
-
-- Tekli ve toplu bölüm indirme (çevirmen seçimli, kuyruk takibi)
 - Ayarlar içinde sistem bağımlılık kontrolü: dağıtımı algılar, eksikleri tek komutla kurdurur
 - Kart düzeni, hover davranışı ve oynatıcı başlatma düzeltmeleri
-- Eski işlemcilerde çalışması için x86-64-v2 hedefli derleme
+
+
 
 Tek dosyalık taşınabilir AppImage olarak dağıtılır. Açılışta yeni sürümü kontrol edip kendini güncelleyebilir. AppImage x86-64-v2 için derlenir, AVX512 gerektirmez.
 
