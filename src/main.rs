@@ -316,20 +316,17 @@ fn main() {
                 .dock-mini {
                     min-width: 24px;
                     min-height: 24px;
-                    padding: 2px;
-                }
-
-                /* === Dock alt yazıları === */
-                .side-caption {
-                    font-size: 0.68em;
-                    color: alpha(currentColor, 0.65);
-                }
-
-                /* === Kart Başlık Yazısı === */
-                .card-title {
-                    font-weight: 600;
-                    font-size: 0.85em;
                     margin-top: 2px;
+                }
+
+                /* === Yüzen indirme hapı: kapsül kabı, düğmeleri sarar === */
+                .dl-float-pill {
+                    background-color: alpha(@card_bg_color, 0.95);
+                    color: @card_fg_color;
+                    border: 1px solid alpha(currentColor, 0.12);
+                    border-radius: 999px;
+                    padding: 6px 6px 6px 14px;
+                    box-shadow: 0 8px 24px alpha(black, 0.45);
                 }
 
                 /* === Raf Başlıkları: düz, ortalı, parlama yok === */

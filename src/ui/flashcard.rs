@@ -460,7 +460,7 @@ mod tests {
     use super::*;
 
     fn ep(season: u64, episode: u64) -> Episode {
-        Episode { season, episode, name: format!("B{episode}") }
+        Episode { season, episode, name: format!("B{episode}"), thumbnail: None }
     }
 
     fn fs(tpl: i64, name: &str, rating: f64) -> FansubInfo {
