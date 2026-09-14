@@ -239,8 +239,8 @@ Uygulama, ağ gecikmesini azaltmak için aşağıdaki teknikleri kullanır:
 
 ## AniSkip Entegrasyonu
 
-AnimeciX, intro ve outro'ları otomatik atlamak için topluluk tarafından işletilen
-**[aniskip-mirror](https://github.com/nyx47rd/aniskip-mirror)** API'sini kullanır.
+**AnimeciX**, intro ve outro'ları otomatik atlamak için topluluk tarafından işletilen
+**[aniskip-mirror](https://github.com/Lowell137/aniskip-mirror)** API'sini kullanır.
 Orijinal `api.aniskip.com` servisi 2026'da kullanım dışı kalmıştır (alan adı
 süresi dolmuş, GitHub deposu kaldırılmış), bu yüzden aynı JSON şemasına birebir
 uyumlu kendi mirror altyapımız kullanılır.
