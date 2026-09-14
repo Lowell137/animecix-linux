@@ -1,0 +1,11 @@
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential pkg-config cmake ninja-build git curl ca-certificates \
+    libgtk-4-dev libadwaita-1-dev libmpv-dev libssl-dev \
+    squashfs-tools file patchelf zsync libclang-dev clang llvm \
+    libfuse2 desktop-file-utils appstream \
+  && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+WORKDIR /build
