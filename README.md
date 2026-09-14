@@ -21,23 +21,18 @@ Tek dosyalık taşınabilir AppImage olarak dağıtılır. Açılışta yeni sü
 ## Ekran görüntüleri
 
 <div align="center">
-
 | | |
 |:---:|:---:|
 | <img src="screenshots/home.png" width="100%"> | <img src="screenshots/search.png" width="100%"> |
 | Ana Sayfa | Keşfet |
-| <img src="screenshots/episodes.png" width="100%"> | <img src="screenshots/player.png" width="100%"> |
-| Bölüm listesi | Oynatıcı |
-| <img src="screenshots/favorites.png" width="100%"> | <img src="screenshots/history.png" width="100%"> |
-| Favoriler | Geçmiş |
-| <img src="screenshots/marathon.png" width="100%"> | <img src="screenshots/calendar.png" width="100%"> |
-| Maraton | Takvim |
-| <img src="screenshots/news.png" width="100%"> | <img src="screenshots/login.png" width="100%"> |
-| Haberler | Giriş |
-| <img src="screenshots/settings.png" width="100%"> | <img src="screenshots/welcome.png" width="100%"> |
-| Ayarlar | Karşılama |
-
-</div>
+| <img src="screenshots/player.png" width="100%"> | <img src="screenshots/favorites.png" width="100%"> |
+| Oynatıcı | Favoriler |
+| <img src="screenshots/history.png" width="100%"> | <img src="screenshots/marathon.png" width="100%"> |
+| Geçmiş | Maraton |
+| <img src="screenshots/calendar.png" width="100%"> | <img src="screenshots/news.png" width="100%"> |
+| Takvim | Haberler |
+| <img src="screenshots/login.png" width="100%"> | |
+| Giriş | |
 
 ## Kurulum
 

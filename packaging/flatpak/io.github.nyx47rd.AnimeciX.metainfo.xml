@@ -27,20 +27,20 @@
   <launchable type="desktop-id">io.github.nyx47rd.AnimeciX.desktop</launchable>
   <screenshots>
     <screenshot type="default">
-      <image>https://raw.githubusercontent.com/nyx47rd/animecix/main/screenshots/home.png</image>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/home.png</image>
       <caption>Ana ekran</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/nyx47rd/animecix/main/screenshots/search.png</image>
-      <caption>Arama</caption>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/search.png</image>
+      <caption>Keşfet</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/nyx47rd/animecix/main/screenshots/episodes.png</image>
-      <caption>Bölüm listesi</caption>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/player.png</image>
+      <caption>Oynatıcı</caption>
     </screenshot>
     <screenshot>
-      <image>https://raw.githubusercontent.com/nyx47rd/animecix/main/screenshots/marathon.png</image>
-      <caption>Marathon modu</caption>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/marathon.png</image>
+      <caption>Maraton</caption>
     </screenshot>
   </screenshots>
   <provides>
