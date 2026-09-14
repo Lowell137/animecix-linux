@@ -60,7 +60,6 @@ pub(crate) enum SidebarId {
     History,
     Calendar,
     News,
-    Downloads,
     Login,
     Collapse,
 }
@@ -86,7 +85,6 @@ fn dock_caption(id: SidebarId) -> Option<&'static str> {
         SidebarId::History => Some("Geçmiş"),
         SidebarId::Calendar => Some("Takvim"),
         SidebarId::News => Some("Haber"),
-        SidebarId::Downloads => Some("İndirme"),
         _ => None,
     }
 }
@@ -412,6 +410,8 @@ impl App {
         side_head.append(&side_search_btn);
         side_head.append(&side_head_spacer);
         side_head.append(&side_menu_btn);
+        sidebar.append(&side_head);
+
         let home_btn = side_row(&sidebar, &side_items, SidebarId::Home, "Ana Sayfa", "go-home-symbolic", "Ana Sayfa");
         let kesfet_btn = side_row(&sidebar, &side_items, SidebarId::Kesfet, "Keşfet", "view-grid-symbolic", "Keşfet");
         let fav_btn = side_row(&sidebar, &side_items, SidebarId::Favs, "Favoriler", "starred-symbolic", "Favoriler");
@@ -419,7 +419,6 @@ impl App {
         let hist_btn = side_row(&sidebar, &side_items, SidebarId::History, "Geçmiş", "document-open-recent-symbolic", "İzleme Geçmişi");
         let cal_btn = side_row(&sidebar, &side_items, SidebarId::Calendar, "Takvim", "x-office-calendar-symbolic", "Yayın Takvimi");
         let news_btn = side_row(&sidebar, &side_items, SidebarId::News, "Haberler", "animecix-news-symbolic", "Anime Haberleri");
-        let dl_btn = side_row(&sidebar, &side_items, SidebarId::Downloads, "İndirilenler", "folder-download-symbolic", "İndirilenler");
 
         let side_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         side_spacer.set_vexpand(true);
@@ -435,7 +434,7 @@ impl App {
         // En alt: giriş satırı (avatar + kullanıcı adı / "Giriş Yap").
         let login_btn = side_row(&sidebar, &side_items, SidebarId::Login, "Giriş Yap", "avatar-default-symbolic", "Hesap");
 
-        let _ = (home_btn, kesfet_btn, fav_btn, marathon_btn, hist_btn, cal_btn, news_btn, dl_btn, login_btn);
+        let _ = (home_btn, kesfet_btn, fav_btn, marathon_btn, hist_btn, cal_btn, news_btn, login_btn);
 
         let main_stack = gtk::Stack::new();
         main_stack.set_transition_type(gtk::StackTransitionType::SlideLeftRight);
@@ -502,12 +501,6 @@ impl App {
 
         let covers = CoverManager::new(client.clone());
 
-        let dl_queue_path = crate::download::queue_file_path();
-        let (dl_tx, dl_rx) = std::sync::mpsc::channel::<crate::download::UiEvent>();
-        let dl_manager = crate::download::DownloadManager::new(dl_queue_path, dl_tx);
-        let dl_rx = std::sync::Arc::new(std::sync::Mutex::new(dl_rx));
-        let dl_rows: Rc<RefCell<HashMap<String, (gtk::ProgressBar, gtk::Label)>>> =
-            Rc::new(RefCell::new(HashMap::new()));
         let app_inst = Rc::new(Self {
             window,
             stack: main_stack,
@@ -538,8 +531,33 @@ impl App {
             opening_toast_shown_at: Rc::new(RefCell::new(None)),
             loading_gen: Rc::new(Cell::new(0)),
             home_acts: Rc::new(RefCell::new(Vec::new())),
-            dl_manager: dl_manager.clone(),
-            dl_rows: dl_rows.clone(),
+            dl_manager: {
+                let queue_path = crate::download::queue_file_path();
+                let (dl_tx, dl_rx) = std::sync::mpsc::channel::<crate::download::UiEvent>();
+                let mgr = crate::download::DownloadManager::new(queue_path, dl_tx);
+                let dl_rx = std::sync::Arc::new(std::sync::Mutex::new(dl_rx));
+                let mgr_clone = mgr.clone();
+                glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
+                    let mut dirty = false;
+                    if let Ok(rx) = dl_rx.lock() {
+                        while let Ok(ev) = rx.try_recv() {
+                            match ev {
+                                crate::download::UiEvent::Tick => dirty = true,
+                                crate::download::UiEvent::Changed => {
+                                    // Yapısal değişiklik - sayfa yenilenecek
+                                }
+                                crate::download::UiEvent::Toast(m) => {
+                                    eprintln!("[DL] {}", m);
+                                }
+                            }
+                            dirty = true;
+                        }
+                    }
+                    glib::ControlFlow::Continue
+                });
+                mgr
+            },
+            dl_rows: Rc::new(RefCell::new(HashMap::new())),
             player: Rc::new(RefCell::new(None)),
             cur_eps_title: Rc::new(Cell::new(0)),
             cur_eps: Rc::new(RefCell::new(Vec::new())),
@@ -598,33 +616,11 @@ impl App {
             cat_pages: Rc::new(RefCell::new(HashMap::new())),
         });
         {
-            let app_w = Rc::downgrade(&app_inst);
-            glib::timeout_add_local(std::time::Duration::from_millis(500), move || {
-                let mut dirty = false;
-                let mut struct_dirty = false;
-                if let Ok(rx) = dl_rx.lock() {
-                    while let Ok(ev) = rx.try_recv() {
-                        match ev {
-                            crate::download::UiEvent::Tick => dirty = true,
-                            crate::download::UiEvent::Changed => struct_dirty = true,
-                            crate::download::UiEvent::Toast(m) => {
-                                eprintln!("[DL] {}", m);
-                            }
-                        }
-                        dirty = true;
-                    }
-                }
-                if let Some(app) = app_w.upgrade() {
-                    if struct_dirty && app.stack_visible_child_is_downloads() {
-                        app.show_downloads_page();
-                    } else if dirty {
-                        app.refresh_download_rows();
-                    }
-                }
-                glib::ControlFlow::Continue
-            });
+            // Aicix init deferred to Aşama 2
         }
+
         app_inst.chain_signals();
+        app_inst.apply_ui_scale();
         app_inst.apply_sidebar();
         // Açılışta girişliyse sunucu favorilerini sessizce birleştir.
         {
@@ -799,6 +795,7 @@ impl App {
         }
 
         // Sayfa satırları: Ana Sayfa / Favoriler / Maraton / Geçmiş / Takvim / Haberler / Hesap.
+        // (Ayarlar hamburger menüden açılır; vurgusu yok.)
         for (id, page) in [
             (SidebarId::Home, Page::Home),
             (SidebarId::Kesfet, Page::Kesfet),
@@ -807,7 +804,6 @@ impl App {
             (SidebarId::History, Page::History),
             (SidebarId::Calendar, Page::Calendar),
             (SidebarId::News, Page::News),
-            (SidebarId::Downloads, Page::Downloads),
             (SidebarId::Login, Page::Account),
         ] {
             if let Some(b) = find_btn(&self.side_items, id) {
@@ -1062,10 +1058,9 @@ impl App {
             Page::Kesfet => Some(SidebarId::Kesfet),
             Page::Calendar => Some(SidebarId::Calendar),
             Page::News | Page::NewsDetail(_) => Some(SidebarId::News),
-            Page::Downloads => Some(SidebarId::Downloads),
             Page::Reviews { .. } => Some(SidebarId::Home),
-            Page::Settings | Page::Player { .. } | Page::Search | Page::Welcome => None,
             Page::Account => Some(SidebarId::Login),
+            _ => None,
         };
         // Giriş satırı etiketi her navigasyonda tazelenir.
         let uname = self
@@ -1513,10 +1508,6 @@ impl App {
             "news" => {
                 self.page_history.borrow_mut().push(Page::News);
                 self.show_page(&Page::News);
-            }
-            "downloads" => {
-                self.page_history.borrow_mut().push(Page::Downloads);
-                self.show_page(&Page::Downloads);
             }
             "settings" => {
                 self.page_history.borrow_mut().push(Page::Settings);
@@ -3853,44 +3844,6 @@ impl App {
         *self.dl_rows.borrow_mut() = rows;
         scroll
     }
-    /// İndirilenler sayfası görünürde mi?
-    fn stack_visible_child_is_downloads(&self) -> bool {
-        self.stack
-            .visible_child_name()
-            .as_deref()
-            .map(|n| {
-                n == "downloads"
-                    || self.page_history.borrow().last() == Some(&Page::Downloads)
-            })
-            .unwrap_or(false)
-    }
-    /// Yapısal değişiklikte İndirilenler sayfasını kaydırma korunarak yenile.
-    fn show_downloads_page(&self) {
-        let saved = self.current_scroll_value();
-        self.show_page(&Page::Downloads);
-        if saved > 0.0 {
-            self.saved_scroll.set(saved);
-            self.restore_scroll_value(saved);
-        }
-    }
-    /// Tick'te mevcut satırların bar ve durum yazılarını yerinde güncelle.
-    fn refresh_download_rows(&self) {
-        let snap = self.dl_manager.snapshot();
-        let rows = self.dl_rows.borrow();
-        if rows.is_empty() {
-            // Satır yok: ilk Tick'te bile olsa sayfayı yeniden kurma;
-            // boş durumdan ilk kayda geçiş Changed olayıyla olur.
-            return;
-        }
-        for rec in snap {
-            if let Some((bar, lbl)) = rows.get(&rec.id) {
-                let (f, txt, stxt) = crate::ui::downloads_view::DownloadsView::row_state(&rec);
-                bar.set_fraction(f);
-                bar.set_text(Some(&txt));
-                lbl.set_text(&stxt);
-            }
-        }
-    }
     /// Kalite sorusu (tekli: her indirmede; toplu: grup başı bir kez).
     fn ask_download_quality(&self, cb: impl Fn(Option<String>) + 'static) {
         let dialog = adw::MessageDialog::builder()
@@ -4261,50 +4214,8 @@ impl App {
                     movie_view.append(&self.build_related_section(&related));
                 }
             }
-            let dl_film = gtk::Button::from_icon_name("folder-download-symbolic");
-            dl_film.add_css_class("circular");
-            dl_film.set_halign(gtk::Align::End);
-            dl_film.set_valign(gtk::Align::Start);
-            dl_film.set_margin_top(16);
-            dl_film.set_margin_end(16);
-            dl_film.set_tooltip_text(Some("Filmi indir"));
-            {
-                let this_dl = self.clone_ref();
-                let title_dl = title.clone();
-                dl_film.connect_clicked(move |_| {
-                    let this_q = this_dl.clone_ref();
-                    let this2 = this_dl.clone_ref();
-                    let title2 = title_dl.clone();
-                    this_q.ask_download_quality(move |q| {
-                        let Some(quality) = q else { return };
-                        let title3 = title2.clone();
-                        let dir = this2.effective_download_dir();
-                        this2.busy(true);
-                        this2.spawn(move |c| {
-                            let series = crate::download::sanitize_filename(&title3.name);
-                            let e = crate::api::Episode { episode: 1, season: 1, name: title3.name.clone(), thumbnail: None };
-                            let res = c.list_fansubs(title3.id, 1, 1).map(|l| (e, l)).map_err(|e| e.to_string()).and_then(|(ep, l)| {
-                                let fs = l.into_iter().next().ok_or_else(|| "çeviri bulunamadı".to_string())?;
-                                crate::download::resolve_for_download(&c, &dir, &series, &ep, &fs, &quality)
-                            });
-                            move || match res {
-                                Ok(rec) => Msg::DlBatchResolved(vec![rec], Vec::new(), true),
-                                Err(e) => {
-                                    eprintln!("[DL] film çözülemedi: {e}");
-                                    Msg::DlBatchResolved(Vec::new(), vec![e], true)
-                                }
-                            }
-                        });
-                    });
-                });
-            }
             scroll.set_child(Some(&movie_view));
-            let outer = gtk::Overlay::new();
-            outer.set_child(Some(&scroll));
-            outer.add_overlay(&dl_film);
-            let wrap = gtk::ScrolledWindow::new();
-            wrap.set_child(Some(&outer));
-            return wrap;
+            return scroll;
         }
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -4331,139 +4242,15 @@ impl App {
             toast.set_timeout(2);
             this_mar.toast.add_toast(toast);
         });
-        // Toplu indirme durumu.
-        let dl_mode = Rc::new(Cell::new(false));
-        let dl_checks: Rc<RefCell<Vec<(Episode, gtk::CheckButton)>>> =
-            Rc::new(RefCell::new(Vec::new()));
+
+        // Toplu indirme modu butonu (başlıkta kullanılır).
         let dl_mode_btn = gtk::Button::from_icon_name("folder-download-symbolic");
         dl_mode_btn.add_css_class("flat");
         dl_mode_btn.add_css_class("circular");
         dl_mode_btn.add_css_class("lg-icon");
         dl_mode_btn.set_valign(gtk::Align::Center);
         dl_mode_btn.set_tooltip_text(Some("Toplu İndirme Modu"));
-        let dl_float = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        dl_float.add_css_class("dl-float-pill");
-        dl_float.set_margin_bottom(20);
-        dl_float.set_margin_start(12);
-        dl_float.set_margin_end(12);
-        let dl_go = gtk::Button::with_label("⬇ İndir (0)");
-        dl_go.add_css_class("suggested-action");
-        dl_go.add_css_class("pill");
-        dl_go.set_sensitive(false);
-        let dl_cancel = gtk::Button::with_label("Vazgeç");
-        dl_cancel.add_css_class("flat");
-        dl_cancel.add_css_class("pill");
-        dl_float.append(&dl_go);
-        dl_float.append(&dl_cancel);
-        let dl_reveal = gtk::Revealer::new();
-        dl_reveal.set_transition_type(gtk::RevealerTransitionType::SlideUp);
-        dl_reveal.set_transition_duration(250);
-        dl_reveal.set_halign(gtk::Align::Center);
-        dl_reveal.set_valign(gtk::Align::End);
-        dl_reveal.set_child(Some(&dl_float));
-        dl_reveal.set_visible(false);
-        let float_gen: Rc<Cell<u64>> = Rc::new(Cell::new(0));
-        let set_floating = {
-            let dl_reveal = dl_reveal.clone();
-            let float_gen = float_gen.clone();
-            Rc::new(move |show: bool| {
-                let g = float_gen.get() + 1;
-                float_gen.set(g);
-                if show {
-                    dl_reveal.set_visible(true);
-                    dl_reveal.set_reveal_child(true);
-                } else {
-                    dl_reveal.set_reveal_child(false);
-                    let dl_reveal_c = dl_reveal.clone();
-                    let gen_c = float_gen.clone();
-                    glib::timeout_add_local_once(
-                        std::time::Duration::from_millis(260),
-                        move || {
-                            if gen_c.get() == g {
-                                dl_reveal_c.set_visible(false);
-                            }
-                        },
-                    );
-                }
-            })
-        };
-        let exit_dl_mode = {
-            let dl_mode = dl_mode.clone();
-            let dl_checks = dl_checks.clone();
-            let hide = set_floating.clone();
-            let dl_mode_btn = dl_mode_btn.clone();
-            Rc::new(move || {
-                dl_mode.set(false);
-                for (_, c) in dl_checks.borrow().iter() {
-                    c.set_active(false);
-                    c.set_visible(false);
-                }
-                hide(false);
-                dl_mode_btn.remove_css_class("suggested-action");
-            })
-        };
-        let refresh_dl_bar = {
-            let dl_mode = dl_mode.clone();
-            let dl_checks = dl_checks.clone();
-            let dl_go = dl_go.clone();
-            let show = set_floating.clone();
-            Rc::new(move || {
-                let n = dl_checks.borrow().iter().filter(|(_, c)| c.is_active()).count();
-                dl_go.set_label(&format!("⬇ İndir ({n})"));
-                dl_go.set_sensitive(n > 0);
-                show(dl_mode.get() && n > 0);
-            })
-        };
-        {
-            let dl_mode = dl_mode.clone();
-            let dl_checks = dl_checks.clone();
-            let btn_c = dl_mode_btn.clone();
-            let btn_c2 = dl_mode_btn.clone();
-            let refresh = refresh_dl_bar.clone();
-            let exit = exit_dl_mode.clone();
-            btn_c.connect_clicked(move |_| {
-                if dl_mode.get() {
-                    exit();
-                } else {
-                    dl_mode.set(true);
-                    for (_, c) in dl_checks.borrow().iter() {
-                        c.set_visible(true);
-                    }
-                    btn_c2.add_css_class("suggested-action");
-                }
-                refresh();
-            });
-        }
-        {
-            let exit = exit_dl_mode.clone();
-            dl_cancel.connect_clicked(move |_| exit());
-        }
-        {
-            let this_go = self.clone_ref();
-            let title_go = title.clone();
-            let dl_checks_go = dl_checks.clone();
-            let exit = exit_dl_mode.clone();
-            dl_go.connect_clicked(move |_| {
-                let eps: Vec<Episode> = dl_checks_go
-                    .borrow()
-                    .iter()
-                    .filter(|(_, c)| c.is_active())
-                    .map(|(e, _)| e.clone())
-                    .collect();
-                if eps.is_empty() {
-                    return;
-                }
-                exit();
-                let this_q = this_go.clone_ref();
-                let this2 = this_go.clone_ref();
-                let title2 = title_go.clone();
-                this_q.ask_download_quality(move |q| {
-                    if let Some(quality) = q {
-                        this2.start_download_prefetch(title2.clone(), eps.clone(), quality, false);
-                    }
-                });
-            });
-        }
+
         let detail_header = episodes_view::create_title_detail_header(title, &header_poster, &bookmark_btn, &marathon_btn, &dl_mode_btn);
         root.append(&detail_header);
 
@@ -4619,16 +4406,6 @@ impl App {
                 row.set_margin_start(14);
                 row.set_margin_end(14);
                 row.set_valign(gtk::Align::Center);
-                let check = gtk::CheckButton::new();
-                check.set_valign(gtk::Align::Center);
-                check.set_visible(false);
-                check.set_tooltip_text(Some("İndirme için seç"));
-                {
-                    let refresh_c = refresh_dl_bar.clone();
-                    check.connect_toggled(move |_| refresh_c());
-                }
-                row.prepend(&check);
-                dl_checks.borrow_mut().push((e.clone(), check.clone()));
                 row.append(&pic);
                 row.append(&right_col);
 
@@ -4643,47 +4420,13 @@ impl App {
                 done_icon.set_valign(gtk::Align::Center);
                 done_icon.set_visible(*is_watched.borrow());
                 row.append(&done_icon);
-                let dl_one = gtk::Button::from_icon_name("folder-download-symbolic");
-                dl_one.add_css_class("flat");
-                dl_one.add_css_class("circular");
-                dl_one.set_valign(gtk::Align::Center);
-                dl_one.set_tooltip_text(Some("Bölümü indir"));
-                {
-                    let this_dl = self.clone_ref();
-                    let title_dl = title.clone();
-                    let ep_dl = e.clone();
-                    dl_one.connect_clicked(move |_| {
-                        let this_q = this_dl.clone_ref();
-                        let this2 = this_dl.clone_ref();
-                        let title2 = title_dl.clone();
-                        let ep2 = ep_dl.clone();
-                        this_q.ask_download_quality(move |q| {
-                            if let Some(quality) = q {
-                                this2.start_download_prefetch(title2.clone(), vec![ep2.clone()], quality, true);
-                            }
-                        });
-                    });
-                }
-                row.append(&dl_one);
+
                 let this_play = self.clone_ref();
                 let title_play = title.clone();
                 let ep_play = e.clone();
-                let row_c = row.clone();
-                let check_c = check.clone();
-                let dl_one_c = dl_one.clone();
                 let click = gtk::GestureClick::new();
                 click.set_button(1); // sadece sol tık
-                click.connect_pressed(move |_, _, x, y| {
-                    // Düğme/checkbox tıklaması satırı oynatmasın.
-                    for w in [check_c.upcast_ref::<gtk::Widget>(), dl_one_c.upcast_ref::<gtk::Widget>()] {
-                        if let Some(r) = w.compute_bounds(&row_c) {
-                            let (bx, by, bw, bh) =
-                                (r.x() as f64, r.y() as f64, r.width() as f64, r.height() as f64);
-                            if x >= bx && x <= bx + bw && y >= by && y <= by + bh {
-                                return;
-                            }
-                        }
-                    }
+                click.connect_pressed(move |_, _, _, _| {
                     this_play.play(&title_play, &ep_play);
                 });
                 row.add_controller(click);
@@ -4709,7 +4452,6 @@ impl App {
 
                     let menu_model = gio::Menu::new();
                     menu_model.append(Some(label), Some("row.toggle-watched"));
-                    menu_model.append(Some("⬇ Bölümü İndir"), Some("row.download-ep"));
 
                     let client_c = this_ctx.client.clone();
                     let title_c = title_ctx.clone();
@@ -4747,22 +4489,6 @@ impl App {
                         this_refresh.toast.add_toast(toast);
                     });
                     action_group.add_action(&action);
-                    let this_dl_ctx = this_ctx.clone_ref();
-                    let title_dl_ctx = title_ctx.clone();
-                    let ep_dl_ctx = ep_ctx.clone();
-                    let dl_action = gio::SimpleAction::new("download-ep", None);
-                    dl_action.connect_activate(move |_, _| {
-                        let this_q = this_dl_ctx.clone_ref();
-                        let this2 = this_dl_ctx.clone_ref();
-                        let title2 = title_dl_ctx.clone();
-                        let ep2 = ep_dl_ctx.clone();
-                        this_q.ask_download_quality(move |q| {
-                            if let Some(quality) = q {
-                                this2.start_download_prefetch(title2.clone(), vec![ep2.clone()], quality, true);
-                            }
-                        });
-                    });
-                    action_group.add_action(&dl_action);
                     row_ctx.insert_action_group("row", Some(&action_group));
 
                     let popover = gtk::PopoverMenu::from_model(Some(&menu_model));
@@ -4904,10 +4630,8 @@ impl App {
                 ));
             }
         }
-        let overlay = gtk::Overlay::new();
-        overlay.set_child(Some(&root));
-        overlay.add_overlay(&dl_reveal);
-        scroll.set_child(Some(&overlay));
+
+        scroll.set_child(Some(&root));
         scroll
     }
 

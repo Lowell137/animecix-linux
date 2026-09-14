@@ -743,7 +743,7 @@ mod tests {
     }
 
     fn test_ep() -> crate::api::Episode {
-        crate::api::Episode { season: 1, episode: 2, name: "Bölüm".into(), thumbnail: None }
+        crate::api::Episode { season: 1, episode: 2, name: "Bölüm".into() }
     }
 
     fn test_fs() -> crate::api::FansubInfo {
