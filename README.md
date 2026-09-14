@@ -4,7 +4,7 @@
 [![Lisans: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
 
 <img src="assets/hicolor/256x256/apps/tr.com.animecix.png" align="right" width="96" height="96" alt="AnimeciX">
-
+Bu Fork AI ile yapılmıştır
 GTK4 ile yazılmış anime, dizi ve film istemcisi. Bu depo, orijinal projeden ayrılmış bir çataldır ve doğrudan buradan geliştirilir.
 
 Bu çatala eklenenler:
