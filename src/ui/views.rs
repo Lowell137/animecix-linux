@@ -5,6 +5,48 @@ use std::cell::RefCell;
 use crate::api::{Client, HistoryEntry, Settings, Title, marathon_summary};
 use crate::ui::episodes_view;
 
+/// Milisaniye epoch → "GG.AA" (sunucu geçmiş tarihleri için, UTC).
+fn fmt_day_month(ms: u64) -> String {
+    let days = ms / 86_400_000;
+    let mut y: i64 = 1970;
+    let mut d = days as i64;
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let yd = if leap { 366 } else { 365 };
+        if d < yd {
+            break;
+        }
+        d -= yd;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let months = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut m = 0;
+    while m < 12 && d >= months[m] {
+        d -= months[m];
+        m += 1;
+    }
+    format!("{:02}.{:02}", d + 1, m + 1)
+}
+
+pub(crate) fn show_info_dialog(parent: Option<&gtk::Window>, heading: &str, body: &str) {
+    let dialog = adw::MessageDialog::builder()
+        .heading(heading)
+        .body(body)
+        .close_response("ok")
+        .default_response("ok")
+        .build();
+    if let Some(win) = parent {
+        dialog.set_transient_for(Some(win));
+    }
+    dialog.add_response("ok", "Tamam");
+    dialog.present();
+}
+
 pub struct MarathonView;
 
 impl MarathonView {
@@ -259,18 +301,28 @@ impl HistoryView {
     pub fn build(
         _client: &Client,
         history: &[HistoryEntry],
+        server: &[crate::api::ServerEntry],
+        server_loading: bool,
+        total: usize,
+        cols: u32,
         on_delete_selected: impl Fn(Vec<u64>) + 'static,
         on_clear_all: impl Fn() + 'static,
         on_item_click: impl Fn(HistoryEntry) + 'static,
+        on_card: impl Fn(&crate::api::Title, &str) -> gtk::Box + 'static,
+        on_more: impl Fn() + 'static,
+        server_error: Option<String>,
+        on_retry: impl Fn() + 'static,
         cover_loader: impl Fn(Option<&str>, &gtk::Picture, i32, i32) + 'static,
     ) -> gtk::Box {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
+        root.set_hexpand(true);
+        root.set_halign(gtk::Align::Fill);
         root.set_margin_top(8);
         root.set_margin_bottom(8);
         root.set_margin_start(12);
         root.set_margin_end(12);
 
-        if history.is_empty() {
+        if history.is_empty() && server.is_empty() && !server_loading {
             let sp = crate::ui::components::create_status_page(
                 "İzleme Geçmişi Boş",
                 "Henüz bir bölüm veya film izlemediniz.",
@@ -278,6 +330,18 @@ impl HistoryView {
             );
             root.append(&sp);
             return root;
+        }
+
+        let section = |text: &str| {
+            let l = gtk::Label::new(Some(text));
+            l.add_css_class("shelf-title");
+            l.set_xalign(0.0);
+            l.set_margin_top(6);
+            l
+        };
+
+        if !history.is_empty() {
+            root.append(&section("Bu cihazda izlenenler"));
         }
 
         let action_bar = gtk::Box::new(gtk::Orientation::Horizontal, 8);
@@ -308,6 +372,8 @@ impl HistoryView {
         root.append(&action_bar);
 
         let list_box = gtk::Box::new(gtk::Orientation::Vertical, 5);
+        list_box.set_hexpand(true);
+        list_box.set_halign(gtk::Align::Fill);
         list_box.set_vexpand(false);
 
         let selected_ids = Rc::new(RefCell::new(Vec::<u64>::new()));
@@ -420,6 +486,101 @@ impl HistoryView {
         });
 
         root.append(&list_box);
+
+        // ---- sunucu geçmişi ----
+        if let Some(err) = server_error {
+            if server.is_empty() && !server_loading {
+                let sp = crate::ui::components::create_status_page(
+                    "Geçmiş Yüklenemedi",
+                    &err,
+                    "network-error-symbolic",
+                );
+                root.append(&sp);
+                let retry_btn = gtk::Button::with_label("Tekrar Dene");
+                retry_btn.add_css_class("suggested-action");
+                retry_btn.add_css_class("pill");
+                retry_btn.set_halign(gtk::Align::Center);
+                retry_btn.set_margin_top(8);
+                let on_r = Rc::new(on_retry);
+                retry_btn.connect_clicked(move |_| {
+                    on_r();
+                });
+                root.append(&retry_btn);
+                return root;
+            }
+        }        if server_loading && server.is_empty() {
+            let spin_row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+            spin_row.set_margin_top(8);
+            let sp = gtk::Spinner::new();
+            sp.start();
+            let lbl = gtk::Label::new(Some("Sitedeki geçmişin yükleniyor…"));
+            lbl.add_css_class("dim-label");
+            spin_row.append(&sp);
+            spin_row.append(&lbl);
+            root.append(&spin_row);
+        }
+        if !server.is_empty() {
+            root.append(&section("Sitede izlenenler (son izlenen önce)"));
+            // Sabit 5 sütun ızgara (diğer bölümlerle aynı kart boyu).
+            let grid = gtk::Grid::new();
+            grid.set_column_spacing(12);
+            grid.set_row_spacing(18);
+            grid.set_halign(gtk::Align::Center);
+            grid.set_hexpand(true);
+            grid.set_margin_top(6);
+            grid.set_margin_bottom(6);
+            let on_card_rc = Rc::new(on_card);
+            let cols = cols.max(1);
+            for (i, s) in server.iter().enumerate() {
+                let t = &s.title;
+                // Sunucunun bildiği son bölüm + tarih (örn. "S01E02 · 11.09").
+                let mut sub = String::new();
+                if s.season > 0 && s.episode > 0 {
+                    sub.push_str(&format!("S{:02}E{:02}", s.season, s.episode));
+                }
+                if s.date > 0 {
+                    if !sub.is_empty() {
+                        sub.push_str(" · ");
+                    }
+                    sub.push_str(&fmt_day_month(s.date));
+                }
+                grid.attach(
+                    &on_card_rc(t, &sub),
+                    (i as u32 % cols) as i32,
+                    (i as u32 / cols) as i32,
+                    1,
+                    1,
+                );
+            }
+            root.append(&grid);
+            // Progressive yükleme: "Daha Fazla Göster" sonraki sayfayı
+            // API'den çekip listeye ekler (hepsi tek seferde inmez).
+            if total > server.len() {
+                let more_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+                more_box.set_halign(gtk::Align::Center);
+                more_box.set_margin_top(10);
+                more_box.set_margin_bottom(4);
+                let more_btn = gtk::Button::with_label(&format!(
+                    "Daha Fazla Göster ({} / {})",
+                    server.len(),
+                    total
+                ));
+                more_btn.add_css_class("pill");
+                more_btn.set_sensitive(!server_loading);
+                let on_m = Rc::new(on_more);
+                more_btn.connect_clicked(move |_| {
+                    on_m();
+                });
+                more_box.append(&more_btn);
+                if server_loading {
+                    let sp = gtk::Spinner::new();
+                    sp.start();
+                    sp.set_valign(gtk::Align::Center);
+                    more_box.append(&sp);
+                }
+                root.append(&more_box);
+            }
+        }
         root
     }
 }
@@ -465,7 +626,7 @@ impl SettingsView {
 
         let search_sc_row = adw::ComboRow::new();
         search_sc_row.set_title("Kısayol Tuşu");
-        search_sc_row.set_subtitle("Ana ekranda arama çubuğunu açacak klavye kısayolu");
+        search_sc_row.set_subtitle("Ana ekranda arama penceresini açacak klavye kısayolu");
         let search_shortcuts = &["Ctrl+S", "Ctrl+K", "F2", "/"];
         let search_sc_model = gtk::StringList::new(search_shortcuts);
         search_sc_row.set_model(Some(&search_sc_model));
@@ -473,23 +634,6 @@ impl SettingsView {
         search_sc_row.set_selected(current_sc as u32);
         search_group.add(&search_sc_row);
         root.append(&search_group);
-
-        let tools_group = adw::PreferencesGroup::new();
-        tools_group.set_title("Sayfalar Menüsü Kısayolu");
-
-        let tools_sc_row = adw::ComboRow::new();
-        tools_sc_row.set_title("Kısayol Tuşu");
-        tools_sc_row.set_subtitle("Sayfalar menüsünü açacak klavye kısayolu (çıplak T metin alanında çalışmaz)");
-        let tools_sc_model =
-            gtk::StringList::new(&crate::ui::tools_menu::TOOL_SHORTCUT_OPTIONS);
-        tools_sc_row.set_model(Some(&tools_sc_model));
-        let current_tools_sc = crate::ui::tools_menu::TOOL_SHORTCUT_OPTIONS
-            .iter()
-            .position(|&s| s == settings.tools_shortcut)
-            .unwrap_or(0);
-        tools_sc_row.set_selected(current_tools_sc as u32);
-        tools_group.add(&tools_sc_row);
-        root.append(&tools_group);
 
         let view_group = adw::PreferencesGroup::new();
         view_group.set_title("Görünüm");
@@ -509,47 +653,28 @@ impl SettingsView {
         };
         scale_row.set_selected(current_scale);
         view_group.add(&scale_row);
-
-        let theme_row = adw::ComboRow::new();
-        theme_row.set_title("Tema");
-        theme_row.set_subtitle("Koyu renklerde gradyan arka plan, anında uygulanır");
-        let theme_names: Vec<&str> = crate::theme::THEMES.iter().map(|(_, n)| *n).collect();
-        let theme_model = gtk::StringList::new(&theme_names);
-        theme_row.set_model(Some(&theme_model));
-        let current_theme = crate::theme::THEMES
-            .iter()
-            .position(|(id, _)| *id == settings.theme)
-            .unwrap_or(0) as u32;
-        theme_row.set_selected(current_theme);
-        view_group.add(&theme_row);
         root.append(&view_group);
 
         let player_group = adw::PreferencesGroup::new();
         player_group.set_title("Oynatıcı Ayarları");
 
         let fs_row = adw::SwitchRow::new();
-        fs_row.set_title("MPV Otomatik Tam Ekran");
-        fs_row.set_subtitle("Video başladığında MPV'yi otomatik tam ekran modunda açar");
+        fs_row.set_title("Otomatik Tam Ekran");
+        fs_row.set_subtitle("Video başladığında oynatıcıyı otomatik tam ekran modunda açar");
         fs_row.set_active(settings.auto_fullscreen);
         player_group.add(&fs_row);
 
-        let intro_hint_row = adw::SwitchRow::new();
-        intro_hint_row.set_title("İntro/Outro Bildirimleri");
-        intro_hint_row.set_subtitle("İntro ve outro başlayınca mpv'de bilgi gösterir ('s'/'e' tuşları hep çalışır)");
-        intro_hint_row.set_active(settings.show_intro_hint);
-        player_group.add(&intro_hint_row);
+        let embed_row = adw::SwitchRow::new();
+        embed_row.set_title("Gömülü Oynatıcı (GTK içinde)");
+        embed_row.set_subtitle("Bölümler harici MPV penceresi yerine uygulamanın içindeki oynatıcıda açılır");
+        embed_row.set_active(settings.embedded_player);
+        player_group.add(&embed_row);
 
-        let music_hint_row = adw::SwitchRow::new();
-        music_hint_row.set_title("Şarkıda 'Shift+M' Tuşu İpucu");
-        music_hint_row.set_subtitle("Şarkı satırında şarkıyı tarayıcıda açan 'Shift+M' tuşunu hatırlatır");
-        music_hint_row.set_active(settings.show_music_hint);
-        player_group.add(&music_hint_row);
-
-        let play_q_row = adw::SwitchRow::new();
-        play_q_row.set_title("Oynatırken Kalite Sor");
-        play_q_row.set_subtitle("Bölüm açılırken kalite seçilsin (kapalıysa en iyi açılır)");
-        play_q_row.set_active(settings.play_ask_quality);
-        player_group.add(&play_q_row);
+        let aniskip_row = adw::SwitchRow::new();
+        aniskip_row.set_title("AniSkip Otomatik İntro Atlama Entegrasyonu");
+        aniskip_row.set_subtitle("AniSkip API üzerinden 's' kısayol tuşu ile intro bitişine otomatik atlar");
+        aniskip_row.set_active(settings.aniskip_enabled);
+        player_group.add(&aniskip_row);
         root.append(&player_group);
 
         let perf_group = adw::PreferencesGroup::new();
@@ -571,6 +696,138 @@ impl SettingsView {
         patience_row.add_suffix(&patience_spin);
         perf_group.add(&patience_row);
         root.append(&perf_group);
+
+        if !crate::vpn::in_flatpak() {
+        let vpn_group = adw::PreferencesGroup::new();
+        vpn_group.set_title("VPN Proxy (İsteğe Bağlı)");
+
+        let info_btn = gtk::Button::from_icon_name("dialog-information");
+        info_btn.add_css_class("flat");
+        info_btn.add_css_class("circular");
+        info_btn.set_tooltip_text(Some("VPN Proxy ne işe yarar? Tıkla, detaylı açıkla."));
+        info_btn.set_valign(gtk::Align::Center);
+        {
+            let info_btn = info_btn.clone();
+            info_btn.connect_clicked(move |btn| {
+                let parent = btn.root().and_downcast::<gtk::Window>();
+                show_info_dialog(
+                    parent.as_ref(),
+                    "VPN Proxy nedir?",
+                    "ISS'n (internet sağlayıcı) video trafiğini yavaşlatıp kısıtlıyorsa buradan \
+yerel bir proxy (sing-box + ProtonVPN WireGuard) çalıştırabilirsin.\n\n\
+• Proxy ayakta olduğunda video trafiği otomatik olarak \
+127.0.0.1:10808 üzerinden çıkar; root (yönetici) izni gerekmez.\n\
+• Başlattıktan sonra çıkan pencerede 'Yeniden Başlat' dersen ana sayfa/arama gibi \
+API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
+• Proxy kapalıyken hiçbir şey değişmez, uygulama normal bağlantını kullanır.\n\
+• İlk kurulum için 'Başlat'a bas, adım adım rehber çıkar.\n\
+• Proxy kapatılırsa uygulama otomatik normal bağlantıya döner, hiçbir ayarın bozulmaz.",
+                );
+            });
+        }
+        vpn_group.set_header_suffix(Some(&info_btn));
+
+        let vpn_status_row = adw::ActionRow::new();
+        vpn_status_row.set_title("Durum");
+        vpn_status_row.set_subtitle("Yerel proxy (127.0.0.1:10808) üzerinden ISS kısıtlamalarını aşar");
+        let refresh_vpn_status = {
+            let row = vpn_status_row.clone();
+            move || {
+                if crate::vpn::port_alive() {
+                    row.set_subtitle("Çalışıyor — video trafiği 127.0.0.1:10808 üzerinden çıkıyor");
+                    row.remove_css_class("dim-label");
+                } else {
+                    row.set_subtitle("Kapalı — uygulama normal bağlantıyı kullanır");
+                    row.add_css_class("dim-label");
+                }
+            }
+        };
+        refresh_vpn_status();
+        vpn_group.add(&vpn_status_row);
+        root.append(&vpn_group);
+
+        let btn_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        let start_btn = gtk::Button::with_label("Başlat");
+        start_btn.add_css_class("suggested-action");
+        start_btn.add_css_class("pill");
+        let stop_btn = gtk::Button::with_label("Durdur");
+        stop_btn.add_css_class("pill");
+        btn_box.append(&start_btn);
+        btn_box.append(&stop_btn);
+        let vpn_btn_row = adw::ActionRow::new();
+        vpn_btn_row.set_title("sing-box (WireGuard → SOCKS köprüsü)");
+        vpn_btn_row.set_subtitle("ProtonVPN ücretsiz hesapla çalışır; kurulum için Başlat'a bas");
+        vpn_btn_row.add_suffix(&btn_box);
+        vpn_group.add(&vpn_btn_row);
+
+        let refresh_status_rc = std::rc::Rc::new(refresh_vpn_status);
+
+        let live_rs = refresh_status_rc.clone();
+        glib::timeout_add_seconds_local(2, move || {
+            live_rs();
+            glib::ControlFlow::Continue
+        });
+
+        let rs = refresh_status_rc.clone();
+        start_btn.connect_clicked(move |btn| {
+            let parent = btn.root().and_downcast::<gtk::Window>();
+            let rs = rs.clone();
+            glib::spawn_future_local(async move {
+                match crate::vpn::detect() {
+                    None => {
+                        show_info_dialog(parent.as_ref(), "VPN Proxy Kurulumu", &crate::vpn::setup_instructions());
+                        rs();
+                    }
+                    Some((bin, cfg)) => {
+                        let res = {
+                            let bin = bin.clone();
+                            let cfg = cfg.clone();
+                            gio::spawn_blocking(move || crate::vpn::start(&bin, &cfg)).await
+                        };
+                        match res {
+                            Ok(Ok(())) => {
+                                let dlg = adw::MessageDialog::builder()
+                                    .heading("VPN Proxy başlatıldı")
+                                    .body("Video trafiği artık tünel üzerinden çıkıyor.\nAPI isteklerinin (ana sayfa, arama) de tüneleden geçmesi için uygulamayı yeniden başlat.")
+                                    .close_response("later")
+                                    .build();
+                                dlg.add_response("later", "Sonra");
+                                dlg.add_response("restart", "Yeniden Başlat 🔄");
+                                dlg.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
+                                if let Some(w) = parent.as_ref() {
+                                    dlg.set_transient_for(Some(w));
+                                }
+                                dlg.connect_response(None, move |_, resp| {
+                                    if resp == "restart" {
+                                        crate::restart_app();
+                                    }
+                                });
+                                dlg.present();
+                            }
+                            Ok(Err(e)) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", &format!("{e}\n\nLog dosyası: {}", crate::vpn::log_path().display())),
+                            Err(_) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", "Proxy başlatılırken beklenmeyen bir hata oluştu (süreç çökmüş olabilir)."),
+                        }
+                        rs();
+                    }
+                }
+            });
+        });
+
+        let rs2 = refresh_status_rc.clone();
+        stop_btn.connect_clicked(move |btn| {
+            let parent = btn.root().and_downcast::<gtk::Window>();
+            let rs2 = rs2.clone();
+            glib::spawn_future_local(async move {
+                let killed = gio::spawn_blocking(|| crate::vpn::stop()).await;
+                match killed {
+                    Ok(true) => {}
+                    Ok(false) => show_info_dialog(parent.as_ref(), "VPN Proxy", "Çalışan sing-box süreci bulunamadı."),
+                    Err(_) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", "Proxy durdurulurken beklenmeyen bir hata oluştu."),
+                }
+                rs2();
+            });
+        });
+        }
 
         let img_group = adw::PreferencesGroup::new();
         img_group.set_title("Görüntü İyileştirme");
@@ -614,6 +871,11 @@ impl SettingsView {
         ask_row.set_subtitle("Kapalıysa otomatik olarak en yüksek puanlı çeviri seçilir");
         ask_row.set_active(settings.fansub_ask_each_time);
         fansub_group.add(&ask_row);
+        let local_hist_row = adw::SwitchRow::new();
+        local_hist_row.set_title("Yerel geçmişi kaydet");
+        local_hist_row.set_subtitle("Kapalıysa bu cihazda izlenenler kaydedilmez; sadece sitedeki geçmiş gösterilir");
+        local_hist_row.set_active(settings.local_history_enabled);
+        fansub_group.add(&local_hist_row);
         let fansub_desc = gtk::Label::new(Some(
             "Bir bölüme tıkladığınızda mevcut çeviriler listelenir (örn. Kirigana, Wolwead). Puan yıldızı topluluk oylarına dayanır.",
         ));
@@ -626,10 +888,50 @@ impl SettingsView {
         fansub_desc.add_css_class("dim-label");
         fansub_group.add(&fansub_desc);
         root.append(&fansub_group);
-        let update_group = adw::PreferencesGroup::new();
-        update_group.set_title("Güncelleme");
-
         let on_save = Rc::new(on_save);
+        let dl_group = adw::PreferencesGroup::new();
+        dl_group.set_title("İndirme");
+        let dl_dir_row = adw::ActionRow::new();
+        dl_dir_row.set_title("İndirme Klasörü");
+        let initial_dl = settings.download_dir.clone().unwrap_or_else(|| {
+            crate::download::default_download_dir().to_string_lossy().into_owned()
+        });
+        dl_dir_row.set_subtitle(&initial_dl);
+        let dl_pick = gtk::Button::with_label("Değiştir");
+        dl_pick.add_css_class("flat");
+        dl_pick.add_css_class("pill");
+        dl_pick.set_valign(gtk::Align::Center);
+        dl_dir_row.add_suffix(&dl_pick);
+        dl_group.add(&dl_dir_row);
+        {
+            let s_o = settings.clone();
+            let on_o = on_save.clone();
+            let row_o = dl_dir_row.clone();
+            dl_pick.connect_clicked(move |_| {
+                let s_base_c = s_o.clone();
+                let on_save_c = on_o.clone();
+                let row_c = row_o.clone();
+                let dialog = gtk::FileDialog::builder().title("İndirme Klasörü Seç").build();
+                dialog.select_folder(
+                    None::<&gtk::Window>,
+                    None::<&gio::Cancellable>,
+                    move |res| match res {
+                        Ok(f) => {
+                            if let Some(path) = f.path() {
+                                let dir = path.to_string_lossy().into_owned();
+                                let mut s = s_base_c.clone();
+                                s.download_dir = Some(dir.clone());
+                                row_c.set_subtitle(&dir);
+                                on_save_c(s);
+                            }
+                        }
+                        Err(e) => eprintln!("[DL] klasör seçilemedi: {e}"),
+                    },
+                );
+            });
+        }
+        root.append(&dl_group);
+        let update_group = adw::PreferencesGroup::new();
 
         let auto_update_row = adw::SwitchRow::new();
         auto_update_row.set_title("Otomatik Güncelleme");
@@ -678,19 +980,17 @@ impl SettingsView {
             let st_r = search_toggle_row.clone();
             let sc_r = shortcut_row.clone();
             let ssc_r = search_sc_row.clone();
-            let tsc_r = tools_sc_row.clone();
             let scale_r = scale_row.clone();
-            let theme_r = theme_row.clone();
             let fs_r = fs_row.clone();
-            let ih_r = intro_hint_row.clone();
-            let mh_r = music_hint_row.clone();
-            let pq_r = play_q_row.clone();
+            let emb_r = embed_row.clone();
+            let ani_r = aniskip_row.clone();
             let au_r = auto_update_row.clone();
             let notify_r = notify_row.clone();
             let up_r = upscale_row.clone();
             let light_r = light_row.clone();
             let patience_spin_c = patience_spin.clone();
             let ask_r = ask_row.clone();
+            let hist_r = local_hist_row.clone();
             let s = s_base.clone();
             let on_save = on_save.clone();
             Rc::new(move || {
@@ -708,25 +1008,14 @@ impl SettingsView {
                     3 => "/".into(),
                     _ => "Ctrl+S".into(),
                 };
-                updated.tools_shortcut = match tsc_r.selected() {
-                    1 => "Alt+T".into(),
-                    2 => "F10".into(),
-                    3 => "T".into(),
-                    _ => "Ctrl+T".into(),
-                };
                 updated.ui_scale = match scale_r.selected() {
                     1 => 1.25,
                     2 => 1.5,
                     _ => 1.0,
                 };
-                updated.theme = crate::theme::THEMES
-                    .get(theme_r.selected() as usize)
-                    .map(|(id, _)| id.to_string())
-                    .unwrap_or_else(|| crate::theme::DEFAULT_THEME.to_string());
                 updated.auto_fullscreen = fs_r.is_active();
-                updated.show_intro_hint = ih_r.is_active();
-                updated.show_music_hint = mh_r.is_active();
-                updated.play_ask_quality = pq_r.is_active();
+                updated.embedded_player = emb_r.is_active();
+                updated.aniskip_enabled = ani_r.is_active();
                 updated.auto_update = au_r.is_active();
                 updated.notify_uptodate = notify_r.is_active();
                 updated.upscale = match up_r.selected() {
@@ -739,12 +1028,15 @@ impl SettingsView {
                 updated.light_mode = light_r.is_active();
                 updated.source_patience_secs = patience_spin_c.value() as u64;
                 updated.fansub_ask_each_time = ask_r.is_active();
+                updated.local_history_enabled = hist_r.is_active();
                 on_save(updated);
             })
         };
 
         let sa_ask = save_all.clone();
         ask_row.connect_active_notify(move |_| sa_ask());
+        let sa_hist = save_all.clone();
+        local_hist_row.connect_active_notify(move |_| sa_hist());
 
         let sa1 = save_all.clone();
         search_toggle_row.connect_active_notify(move |_| sa1());
@@ -752,20 +1044,14 @@ impl SettingsView {
         shortcut_row.connect_selected_notify(move |_| sa2());
         let sa3 = save_all.clone();
         search_sc_row.connect_selected_notify(move |_| sa3());
-        let sa_tools = save_all.clone();
-        tools_sc_row.connect_selected_notify(move |_| sa_tools());
         let sa_scale = save_all.clone();
         scale_row.connect_selected_notify(move |_| sa_scale());
-        let sa_theme = save_all.clone();
-        theme_row.connect_selected_notify(move |_| sa_theme());
         let sa4 = save_all.clone();
         fs_row.connect_active_notify(move |_| sa4());
-        let sa5a = save_all.clone();
-        intro_hint_row.connect_active_notify(move |_| sa5a());
-        let sa5b = save_all.clone();
-        music_hint_row.connect_active_notify(move |_| sa5b());
-        let sa5c = save_all.clone();
-        play_q_row.connect_active_notify(move |_| sa5c());
+        let sa_emb = save_all.clone();
+        embed_row.connect_active_notify(move |_| sa_emb());
+        let sa5 = save_all.clone();
+        aniskip_row.connect_active_notify(move |_| sa5());
         let sa6 = save_all.clone();
         auto_update_row.connect_active_notify(move |_| sa6());
         let sa7 = save_all.clone();
@@ -776,49 +1062,6 @@ impl SettingsView {
         light_row.connect_active_notify(move |_| sa9());
         let sa10 = save_all.clone();
         patience_spin.connect_value_changed(move |_| sa10());
-
-        let dl_group = adw::PreferencesGroup::new();
-        dl_group.set_title("İndirilenler");
-        let dl_dir_row = adw::ActionRow::new();
-        dl_dir_row.set_title("İndirme Klasörü");
-        let initial_dl = s_base.download_dir.clone().unwrap_or_else(|| {
-            crate::download::default_download_dir().to_string_lossy().into_owned()
-        });
-        dl_dir_row.set_subtitle(&initial_dl);
-        let dl_pick = gtk::Button::with_label("Değiştir");
-        dl_pick.add_css_class("flat");
-        dl_pick.add_css_class("pill");
-        dl_pick.set_valign(gtk::Align::Center);
-        dl_dir_row.add_suffix(&dl_pick);
-        dl_group.add(&dl_dir_row);
-        root.insert_child_after(&dl_group, Some(&player_group));
-        {
-            let s_o = s_base.clone();
-            let on_o = on_save.clone();
-            let row_o = dl_dir_row.clone();
-            dl_pick.connect_clicked(move |_| {
-                let s_base_c = s_o.clone();
-                let on_save_c = on_o.clone();
-                let row_c = row_o.clone();
-                let dialog = gtk::FileDialog::builder().title("İndirme Klasörü Seç").build();
-                dialog.select_folder(
-                    None::<&gtk::Window>,
-                    None::<&gio::Cancellable>,
-                    move |res| match res {
-                        Ok(f) => {
-                            if let Some(path) = f.path() {
-                                let dir = path.to_string_lossy().into_owned();
-                                let mut s = s_base_c.clone();
-                                s.download_dir = Some(dir.clone());
-                                row_c.set_subtitle(&dir);
-                                on_save_c(s);
-                            }
-                        }
-                        Err(e) => eprintln!("[DL] klasör seçilemedi: {e}"),
-                    },
-                );
-            });
-        }
 
         let data_group = adw::PreferencesGroup::new();
         data_group.set_title("Veri Yönetimi");
@@ -891,30 +1134,6 @@ impl SettingsView {
             let _ = crate::install_desktop_entry();
         });
         info_group.add(&reinstall_btn);
-
-        let gh_row = adw::ActionRow::new();
-        gh_row.set_title("GitHub");
-        gh_row.set_subtitle("https://github.com/veilzon/animecix-linux");
-        let gh_icon = crate::ui::brand_icons::github_image(16);
-        gh_row.add_prefix(&gh_icon);
-        let gh_btn = gtk::Button::with_label("Aç");
-        gh_btn.add_css_class("flat");
-        gh_btn.add_css_class("pill");
-        gh_btn.set_valign(gtk::Align::Center);
-        gh_btn.connect_clicked(|_| {
-            let url = "https://github.com/veilzon/animecix-linux";
-            let ok = std::process::Command::new("xdg-open")
-                .arg(url)
-                .spawn()
-                .is_ok();
-            if !ok {
-                let _ = std::process::Command::new("gio")
-                    .args(["open", url])
-                    .spawn();
-            }
-        });
-        gh_row.add_suffix(&gh_btn);
-        info_group.add(&gh_row);
 
         root.append(&info_group);
 

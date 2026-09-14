@@ -1,11 +1,8 @@
 pub mod components;
-pub mod views;
+pub mod downloads_view;
 pub mod episodes_view;
 pub mod fansub_dialog;
 pub mod flashcard;
-pub mod downloads_view;
-pub mod welcome;
-pub mod tools_menu;
-pub mod brand_icons;
+pub mod info_views;
 pub mod row_menu;
-pub mod play_quality_dialog;
+pub mod views;

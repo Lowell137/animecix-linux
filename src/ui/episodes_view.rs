@@ -1,5 +1,7 @@
+//! Bölüm listesi görünümü: kart, butonlar, sağ-tık menü, toplu indirme.
 use gtk::prelude::*;
-use crate::api::Title;
+use crate::api::{Episode, Title};
+use crate::ui::row_menu::RowMenu;
 
 fn create_fact_badges(facts: &[String]) -> gtk::Box {
     let box_ = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -31,6 +33,8 @@ pub fn append_title_submeta(info_box: &gtk::Box, t: &Title) {
     info_box.append(&meta);
 }
 
+/// Başlık detay kartı (film/dizi üst kısmı): kapak + bilgi + butonlar.
+/// İndirme butonu `download_btn` olarak dışarıdan verilir (film/dizi ortak).
 pub fn create_title_detail_header(
     title: &Title,
     poster_widget: &gtk::Picture,
@@ -86,7 +90,6 @@ pub fn create_title_detail_header(
             desc_lbl.set_xalign(0.0);
             desc_lbl.set_wrap(true);
             desc_lbl.set_max_width_chars(60);
-            // Tam metin: satır sınırı ve "..." yok.
             info_box.append(&desc_lbl);
         }
     }
@@ -176,7 +179,6 @@ pub fn create_movie_detail_view(
     root.set_margin_bottom(40);
     root.set_margin_start(28);
     root.set_margin_end(28);
-    // Sabit genişlikte ortalı sütun: içerik her filmde aynı hizada dursun.
     root.set_size_request(760, -1);
     root.set_halign(gtk::Align::Center);
     root.set_vexpand(true);
@@ -205,6 +207,7 @@ pub fn create_movie_detail_view(
         genre_lbl.set_wrap(true);
         genre_lbl.set_margin_start(24);
         genre_lbl.set_margin_end(24);
+        genre_lbl.set_margin_top(4);
         root.append(&genre_lbl);
     }
 
@@ -212,6 +215,8 @@ pub fn create_movie_detail_view(
     if !facts.is_empty() {
         let badges = create_fact_badges(&facts);
         badges.set_halign(gtk::Align::Center);
+        badges.set_margin_start(24);
+        badges.set_margin_end(24);
         root.append(&badges);
     }
 
@@ -225,10 +230,9 @@ pub fn create_movie_detail_view(
             desc_lbl.set_justify(gtk::Justification::Center);
             desc_lbl.set_wrap(true);
             desc_lbl.set_max_width_chars(80);
-            // Metin kutu kenarlarına değmesin.
-            desc_lbl.set_margin_start(44);
-            desc_lbl.set_margin_end(44);
-            // Tam metin: satır sınırı ve "..." yok.
+            desc_lbl.set_margin_start(24);
+            desc_lbl.set_margin_end(24);
+            desc_lbl.set_margin_top(12);
             root.append(&desc_lbl);
         }
     }
@@ -237,53 +241,39 @@ pub fn create_movie_detail_view(
     btn_row.set_halign(gtk::Align::Center);
     btn_row.set_valign(gtk::Align::Center);
     btn_row.append(bookmark_btn);
+    btn_row.append(marathon_btn);
+
     let play_btn = gtk::Button::with_label("Filmi İzle 🎬");
     play_btn.add_css_class("suggested-action");
     play_btn.add_css_class("pill");
-    play_btn.add_css_class("movie-play-btn");
-    play_btn.connect_clicked(move |_| {
-        on_play();
-    });
+    play_btn.set_margin_top(8);
+    play_btn.connect_clicked(move |_| on_play());
     btn_row.append(&play_btn);
-    btn_row.append(marathon_btn);
     root.append(&btn_row);
-
-    let fmt_t = |s: f64| -> String {
-        let s = s as u64;
-        let h = s / 3600;
-        let m = (s % 3600) / 60;
-        let sec = s % 60;
-        if h > 0 { format!("{h}:{:02}:{:02}", m, sec) }
-        else { format!("{m}:{:02}", sec) }
-    };
 
     let prog_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
     prog_box.set_halign(gtk::Align::Center);
     prog_box.set_size_request(520, -1);
     let pb = gtk::ProgressBar::new();
     pb.add_css_class("episode-progress");
-    pb.set_hexpand(true);
     let lbl = gtk::Label::new(None);
     lbl.add_css_class("dim-label");
     lbl.set_xalign(0.5);
-    lbl.set_halign(gtk::Align::Center);
-
     if let Some((pos, dur)) = progress {
         if dur > 0.0 {
             pb.set_fraction((pos / dur).clamp(0.0, 1.0));
-            lbl.set_text(&format!("İzlendi: {} / {}", fmt_t(pos), fmt_t(dur)));
-            lbl.set_visible(true);
-        } else {
-            pb.set_visible(false);
-            lbl.set_visible(false);
+            lbl.set_text(&format!("{} / {}", fmt_time(pos), fmt_time(dur)));
         }
-    } else {
-        pb.set_visible(false);
-        lbl.set_visible(false);
     }
-
     prog_box.append(&pb);
     prog_box.append(&lbl);
     root.append(&prog_box);
+
     (root, pb, lbl)
+}
+
+fn fmt_time(s: f64) -> String {
+    let s = s as u64;
+    if s >= 3600 { format!("{}:{:02}:{:02}", s/3600, (s%3600)/60, s%60) }
+    else { format!("{}:{:02}", s/60, s%60) }
 }

@@ -5,29 +5,29 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
 <title>AnimeciX</title>
-<meta name="description" content="AnimeciX: Linux için GTK4/libadwaita ile yazılmış, AppImage olarak dağıtılan anime, dizi ve film masaüstü istemcisi. MPV, resmi intro/outro atlama, Anime4K, otomatik güncelleme.">
-<meta name="keywords" content="anime, linux, gtk4, libadwaita, appimage, mpv, intro-atlama, anime4k">
-<meta name="author" content="veilzon">
+<meta name="description" content="AnimeciX: Linux için GTK4/libadwaita ile yazılmış, AppImage olarak dağıtılan anime, dizi ve film masaüstü istemcisi. MPV, AniSkip, Anime4K, otomatik güncelleme.">
+<meta name="keywords" content="anime, linux, gtk4, libadwaita, appimage, mpv, aniskip, anime4k">
+<meta name="author" content="nyx47rd">
 <meta name="theme-color" content="#fafafb" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#1e1e1e" media="(prefers-color-scheme: dark)">
 
-<link rel="canonical" href="https://veilzon.github.io/animecix-linux/">
-<link rel="alternate" hreflang="tr" href="https://veilzon.github.io/animecix-linux/">
-<link rel="alternate" hreflang="en" href="https://veilzon.github.io/animecix-linux/en.html">
-<link rel="alternate" hreflang="x-default" href="https://veilzon.github.io/animecix-linux/">
+<link rel="canonical" href="https://nyx47rd.github.io/animecix/">
+<link rel="alternate" hreflang="tr" href="https://nyx47rd.github.io/animecix/">
+<link rel="alternate" hreflang="en" href="https://nyx47rd.github.io/animecix/en.html">
+<link rel="alternate" hreflang="x-default" href="https://nyx47rd.github.io/animecix/">
 
 <meta property="og:type" content="website">
 <meta property="og:title" content="AnimeciX">
 <meta property="og:description" content="GTK4/libadwaita anime, dizi ve film istemcisi. AppImage olarak dağıtılır.">
-<meta property="og:url" content="https://veilzon.github.io/animecix-linux/">
-<meta property="og:image" content="https://veilzon.github.io/animecix-linux/assets/icon.png">
+<meta property="og:url" content="https://nyx47rd.github.io/animecix/">
+<meta property="og:image" content="https://nyx47rd.github.io/animecix/assets/icon.png">
 <meta property="og:locale" content="tr_TR">
 <meta property="og:site_name" content="AnimeciX">
 
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AnimeciX">
 <meta name="twitter:description" content="GTK4/libadwaita anime istemcisi. AppImage.">
-<meta name="twitter:image" content="https://veilzon.github.io/animecix-linux/assets/icon.png">
+<meta name="twitter:image" content="https://nyx47rd.github.io/animecix/assets/icon.png">
 
 <link rel="icon" type="image/png" href="assets/icon.png">
 <link rel="apple-touch-icon" href="assets/icon.png">
@@ -40,28 +40,27 @@
   "name": "AnimeciX",
   "operatingSystem": "Linux",
   "applicationCategory": "MultimediaApplication",
-  "description": "GTK4/libadwaita anime, dizi ve film masaüstü istemcisi. AppImage olarak dağıtılır. MPV, resmi intro/outro atlama, Anime4K, otomatik güncelleme.",
-  "url": "https://veilzon.github.io/animecix-linux/",
-  "downloadUrl": "https://github.com/veilzon/animecix-linux/releases/latest",
-  "softwareVersion": "1.2.1",
-  "dateModified": "2026-09-13",
+  "description": "GTK4/libadwaita anime, dizi ve film masaüstü istemcisi. AppImage olarak dağıtılır. MPV, AniSkip, Anime4K, otomatik güncelleme.",
+  "url": "https://nyx47rd.github.io/animecix/",
+  "downloadUrl": "https://github.com/nyx47rd/animecix/releases/latest",
+  "softwareVersion": "3.0.0",
+  "dateModified": "2026-08-27",
   "inLanguage": ["tr", "en"],
-  "license": "https://github.com/veilzon/animecix-linux/blob/main/LICENSE",
-  "author": {"@type": "Person", "name": "veilzon", "url": "https://github.com/veilzon"},
-  "publisher": {"@type": "Organization", "name": "AnimeciX", "url": "https://github.com/veilzon/animecix-linux"},
+  "license": "https://github.com/nyx47rd/animecix/blob/main/LICENSE",
+  "author": {"@type": "Person", "name": "nyx47rd", "url": "https://github.com/nyx47rd"},
+  "publisher": {"@type": "Organization", "name": "AnimeciX", "url": "https://github.com/nyx47rd/animecix"},
   "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"},
   "featureList": [
     "GTK4/libadwaita arayüz",
     "Tek dosya AppImage",
     "MPV oynatıcı",
-    "Bölüm ve film indirme (çok bağlantılı, kaldığı yerden devam)",
-    "Sayfalar menüsü (Ctrl+T ile hızlı erişim)",
-    "5 koyu tema",
-    "Resmi intro/outro atlama + şarkı bilgisi",
+    "AniSkip intro/outro atlama (kendi mirror altyapımız)",
     "Anime4K upscaling (Hafif, Ultra, Keskinleştirme)",
     "Otomatik güncelleme",
+    "VPN proxy desteği (yerel SOCKS5)",
     "Akıllı kaynak seçimi",
-    "Favoriler, Maraton, Geçmiş"
+    "Favoriler, Maraton, Geçmiş",
+    "Çift yol HTTP cascade"
   ]
 }
 </script>
@@ -83,7 +82,7 @@
       <a href="#install" class="nav-link">Kurulum</a>
       <a href="#faq" class="nav-link">SSS</a>
       <a href="en.html" hreflang="en">EN</a>
-      <a href="https://github.com/veilzon/animecix-linux" class="btn flat" rel="noopener">GitHub</a>
+      <a href="https://github.com/nyx47rd/animecix" class="btn flat" rel="noopener">GitHub</a>
     </nav>
   </div>
 </header>
@@ -91,14 +90,14 @@
 <main id="main" class="content">
 
 <section class="hero">
-  <span class="section-eyebrow">v1.2.1</span>
+  <span class="section-eyebrow">v3.0.0</span>
   <h1>AnimeciX</h1>
   <p class="subtitle">Linux için anime, dizi ve film masaüstü istemcisi. GTK4/libadwaita ile yazıldı, AppImage olarak dağıtılır.</p>
   <div class="actions">
-    <a href="https://github.com/veilzon/animecix-linux/releases/latest" class="btn suggested-action large" rel="noopener">İndir (AppImage)</a>
-    <a href="https://github.com/veilzon/animecix-linux" class="btn outlined large" rel="noopener">Kaynak kodu</a>
+    <a href="https://github.com/nyx47rd/animecix/releases/latest" class="btn suggested-action large" rel="noopener">İndir (AppImage)</a>
+    <a href="https://github.com/nyx47rd/animecix" class="btn outlined large" rel="noopener">Kaynak kodu</a>
   </div>
-  <p class="meta">Linux x86_64 · 13.7 MB · MIT Lisansı</p>
+  <p class="meta">Linux x86_64 · 4.6 MB · MIT Lisansı</p>
 </section>
 
 <section id="features">
@@ -109,31 +108,23 @@
     <div class="visual"><img src="assets/screenshots/home.png" alt="Ana sayfa" width="1030" height="770" loading="eager" fetchpriority="high"></div>
     <div class="text">
       <h2>Ana sayfa</h2>
-      <p>Kategorilere göre anime, dizi ve film listeleri. Ortalanmış hap arama çubuğu (<kbd>Ctrl</kbd>+<kbd>S</kbd>), başlık çubuğunda <kbd>‹ Geri</kbd> butonu ve <kbd>Ctrl</kbd>+<kbd>T</kbd> ile açılan Sayfalar menüsü. Tıklayınca detay sayfası.</p>
+      <p>Kategorilere göre anime, dizi ve film listeleri. Yatay raflar, poster büyük, tanıtım metni küçük. Tıklayınca detay sayfası.</p>
     </div>
   </article>
 
   <article class="feature reverse">
-    <div class="visual"><img src="assets/screenshots/episodes.png" alt="Bölüm listesi ve intro atlama" width="1030" height="770" loading="lazy"></div>
+    <div class="visual"><img src="assets/screenshots/episodes.png" alt="Bölüm listesi ve AniSkip" width="1030" height="770" loading="lazy"></div>
     <div class="text">
       <h2>Bölümler ve oynatıcı</h2>
-      <p>MPV tabanlı oynatıcı. Resmi intro/outro verisiyle atlama yapar (<kbd>S</kbd>/<kbd>E</kbd>, üçüncü parti servis yok). Çalan şarkı sağ üstte görünür, <kbd>Shift</kbd>+<kbd>M</kbd> ile tarayıcıda açılır. İstersen bölüm açılırken kalite sorulur. Anime4K ile görüntü iyileştirme, otomatik tam ekran.</p>
+      <p>MPV tabanlı oynatıcı. AniSkip intro ve outro'ları otomatik atlar (kendi <a href="https://github.com/nyx47rd/aniskip-mirror" rel="noopener">aniskip-mirror</a> API'miz, Cloudflare Worker + Vercel failover). Anime4K shader'larıyla görüntü kalitesi artırılır (Hafif, Ultra, Keskinleştirme). 2 dakikalık önbellek, otomatik tam ekran.</p>
     </div>
   </article>
 
   <article class="feature">
-    <div class="visual"><img src="assets/screenshots/film.png" alt="Film sayfası" width="1030" height="770" loading="lazy"></div>
+    <div class="visual"><img src="assets/screenshots/search.png" alt="Hızlı arama" width="1030" height="770" loading="lazy"></div>
     <div class="text">
-      <h2>Film</h2>
-      <p>Filmler kendi sayfasında: tek tıkla oynat, tek tıkla indir. Tüm kaynaklar paralel çözülür, en kalitelisi seçilir. Ölü kaynaklar elenir, başarısız olursa sonraki denenir.</p>
-    </div>
-  </article>
-
-  <article class="feature reverse">
-    <div class="visual"><img src="assets/screenshots/downloads.png" alt="İndirilenler" width="1030" height="770" loading="lazy"></div>
-    <div class="text">
-      <h2>İndirilenler</h2>
-      <p>Bölüm ve film indirme yöneticisi: 6 bağlantıyla hızlı indirme, kaldığı yerden devam, toplu indirme sihirbazı. Kuyruk sırayla işlenir, ilerleme satırda canlı görünür.</p>
+      <h2>Hızlı arama</h2>
+      <p><kbd>Ctrl</kbd>+<kbd>S</kbd> ile ana sayfadan başlık arama, <kbd>/</kbd> tuşuyla bölüm ekranından hızlı bölüm araması. Tüm kaynaklar paralel çözülür, en kalitelisi (boyuta göre) seçilir. Ölü kaynaklar elenir, başarısız olursa sonraki denenir.</p>
     </div>
   </article>
 
@@ -162,18 +153,10 @@
   </article>
 
   <article class="feature">
-    <div class="visual"><img src="assets/screenshots/temalar.png" alt="Beş koyu tema" width="1030" height="770" loading="lazy"></div>
-    <div class="text">
-      <h2>5 koyu tema</h2>
-      <p>Koyu, Bordo, Orman, Lacivert, Mor. Karşılama ekranında canlı önizlemeyle dene, tek tıkla geç. Bölüm satırları temanın rengine bürünür.</p>
-    </div>
-  </article>
-
-  <article class="feature reverse">
     <div class="visual"><img src="assets/screenshots/settings.png" alt="Ayarlar" width="1030" height="770" loading="lazy"></div>
     <div class="text">
-      <h2>Ayarlar</h2>
-      <p>Tema, kısayollar (arama, Sayfalar menüsü), oynatma kalite seçici, indirme klasörü, masaüstü başlatıcı kurulumu, veri sıfırlama ve güncelleme denetimi. Hepsi tek ekranda.</p>
+      <h2>Ayarlar ve VPN proxy</h2>
+      <p>Masaüstü başlatıcı entegrasyonu, kısayollar, veri sıfırlama. <code>127.0.0.1:10808</code>'de bir SOCKS5 proxy (ör. sing-box + ProtonVPN) varsa video trafiği oradan geçer. ISS kısıtlamalarını aşar. Proxy yoksa uygulama normal çalışır.</p>
     </div>
   </article>
 </section>
@@ -187,17 +170,17 @@
   <h3 class="title-2">AppImage (önerilen)</h3>
   <p>Tek dosya, taşınabilir, kurulum gerektirmez.</p>
   <div class="frame">
-<pre><code>wget https://github.com/veilzon/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage
+<pre><code>wget https://github.com/nyx47rd/animecix/releases/latest/download/AnimeciX-x86_64.AppImage
 chmod +x AnimeciX-x86_64.AppImage
 ./AnimeciX-x86_64.AppImage</code></pre>
   </div>
 
   <h3 class="title-2">Masaüstü başlatıcı</h3>
-  <p>Uygulamayı aç, Ayarlar → "Masaüstüne kur" seçeneği ile <code>.desktop</code> dosyası ve uygulama simgesi eklenir. Şu an dağıtım yalnızca AppImage ile yapılır.</p>
+  <p>Uygulamayı aç, Ayarlar → "Masaüstüne kur" seçeneği ile <code>.desktop</code> dosyası ve uygulama simgesi eklenir. Flatpak ve AUR paketleri planlanıyor, şu an sadece AppImage.</p>
 
   <h3 class="title-2">Bağımlılıklar (elle kurulum)</h3>
   <div class="boxed-list">
-    <div><h3>Fedora</h3><p><code>sudo dnf install gtk4 libadwaita mpv</code></p></div>
+    <div><h3>Fedora</h3><p><code>sudo dnf install gtk4 libadwaita mpv webkit2gtk4.1</code></p></div>
     <div><h3>Ubuntu / Debian</h3><p><code>sudo apt install libgtk-4-1 libadwaita-1-0 mpv</code></p></div>
     <div><h3>Arch</h3><p><code>sudo pacman -S gtk4 libadwaita mpv</code></p></div>
   </div>
@@ -212,9 +195,9 @@ chmod +x AnimeciX-x86_64.AppImage
   <h2 class="section-title">Sık sorulanlar</h2>
 
   <details class="expander">
-    <summary>İndirme nasıl çalışıyor?</summary>
+    <summary>Yavaş internette oynatma kasıyor, ne yapabilirim?</summary>
     <div class="body">
-      <p>Bölüm veya film sayfasındaki indir butonuna basman yeterli. Dosyalar 6 bağlantıyla paralel iner, bağlantı koparsa kaldığı yerden devam eder. Toplu indirme sihirbazıyla bir sezonun tamamını sıraya koyabilirsin. Kayıt yeri Ayarlar → indirme klasöründen değişir.</p>
+      <p>Ayarlar → VPN Proxy: <code>127.0.0.1:10808</code>'de bir sing-box + WireGuard yapılandırması çalıştırın. Uygulama video trafiğini otomatik o tünele yönlendirir. Doğrudan bağlantı 403 veya ağ hatası verdiğinde çift-yol (cascade) mekanizmasıyla tünele düşer.</p>
     </div>
   </details>
 
@@ -250,11 +233,11 @@ chmod +x AnimeciX-x86_64.AppImage
 </main>
 
 <footer class="footer">
-  <span>© 2026 veilzon · <a href="https://github.com/veilzon/animecix-linux/blob/main/LICENSE">MIT</a> </span>
+  <span>© 2026 nyx47rd · <a href="https://github.com/nyx47rd/animecix/blob/main/LICENSE">MIT</a> · AniSkip verileri: <a href="https://github.com/nyx47rd/aniskip-mirror" rel="noopener">aniskip-mirror</a></span>
   <ul>
-    <li><a href="https://github.com/veilzon/animecix-linux" rel="noopener">GitHub</a></li>
-    <li><a href="https://github.com/veilzon/animecix-linux/releases" rel="noopener">Sürümler</a></li>
-    <li><a href="https://github.com/veilzon/animecix-linux/issues" rel="noopener">Hata bildir</a></li>
+    <li><a href="https://github.com/nyx47rd/animecix" rel="noopener">GitHub</a></li>
+    <li><a href="https://github.com/nyx47rd/animecix/releases" rel="noopener">Sürümler</a></li>
+    <li><a href="https://github.com/nyx47rd/animecix/issues" rel="noopener">Hata bildir</a></li>
     <li><a href="en.html" hreflang="en">English</a></li>
   </ul>
 </footer>

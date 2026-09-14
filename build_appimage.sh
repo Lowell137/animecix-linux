@@ -15,11 +15,6 @@ MINOR=$(echo "$OLD_VER" | cut -d. -f2)
 PATCH=$(echo "$OLD_VER" | cut -d. -f3)
 
 case "${VERSION_BUMP:-patch}" in
-  none)
-    NEW_MAJOR=$MAJOR
-    NEW_MINOR=$MINOR
-    NEW_PATCH=$PATCH
-    ;;
   major)
     NEW_MAJOR=$((MAJOR + 1))
     NEW_MINOR=0
@@ -57,7 +52,7 @@ VERSION=$(grep -m1 '^version =' Cargo.toml | cut -d '"' -f2)
 # Otomatik GitHub Release: GITHUB_TOKEN tanımlıysa AppImage'ı bir release olarak yayınlar.
 publish_release() {
   local token="${GITHUB_TOKEN:-}"
-  local repo="${GITHUB_REPO:-veilzon/animecix-linux}"
+  local repo="${GITHUB_REPO:-Lowell137/animecix-linux}"
   local asset="AnimeciX-x86_64.AppImage"
   if [ -z "$token" ]; then
     echo "==> GITHUB_TOKEN tanımlı değil, GitHub Release oluşturulmayacak (AppImage yerelde kaldı)."
@@ -152,29 +147,11 @@ X-AppImage-Version=$VERSION
 EOF
 cp "$APPDIR/tr.com.animecix.desktop" "$APPDIR/animecix.desktop"
 
-# 5b. aria2c + kütüphaneleri (6 bağlantılı indirme; glibc çekirdeği hariç).
-if command -v aria2c >/dev/null 2>&1; then
-    mkdir -p "$APPDIR/usr/lib"
-    cp "$(command -v aria2c)" "$APPDIR/usr/bin/aria2c"
-    chmod +x "$APPDIR/usr/bin/aria2c"
-    for lib in $(ldd "$(command -v aria2c)" 2>/dev/null | awk '{print $3}' | grep '^/'); do
-        base="$(basename "$lib")"
-        case "$base" in
-            libc.so*|libm.so*|libpthread.so*|libdl.so*|librt.so*|ld-linux*|libnss*|libresolv.so*) continue ;;
-        esac
-        cp -n "$lib" "$APPDIR/usr/lib/" 2>/dev/null || true
-    done
-    echo "==> aria2c paketlendi: $(du -sh "$APPDIR/usr/bin/aria2c" | cut -f1)"
-else
-    echo "==> UYARI: aria2c yok, iç motorla devam (tek bağlantı)."
-fi
-
 # 6. AppRun betiği oluştur
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/usr/bin/env bash
 HERE="$(dirname "$(readlink -f "${0}")")"
 export PATH="${HERE}/usr/bin:${PATH}"
-export LD_LIBRARY_PATH="${HERE}/usr/lib:${LD_LIBRARY_PATH:-}"
 export APPDIR="${HERE}"
 export XDG_DATA_DIRS="${HERE}/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 # glibc malloc arena tavanı: çok thread'li ayırmalarda RAM şişmesini sınırlar

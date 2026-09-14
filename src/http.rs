@@ -1,5 +1,13 @@
-use std::sync::{Arc, mpsc, Mutex, atomic::{AtomicU8, Ordering}};
+use std::sync::{Arc, mpsc, atomic::{AtomicU8, Ordering}};
 use std::time::Duration;
+
+const CHROME_VERSION: &str = "131.0.0.0";
+const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+const SEC_CH_UA: &str = "\"Google Chrome\";v=\"131\", \"Chromium\";v=\"131\", \"Not_A Brand\";v=\"24\"";
+const SEC_CH_UA_MOBILE: &str = "?0";
+const SEC_CH_UA_PLATFORM: &str = "\"Linux\"";
+const REFERER: &str = "https://animecix.tv/";
+const ACCEPT_LANGUAGE: &str = "tr-TR,tr;q=0.9,en-US;q=0.8,en;q=0.7";
 
 enum Method {
     Get,
@@ -20,6 +28,7 @@ struct RawResp {
     status: u16,
     url: String,
     content_length: Option<u64>,
+    headers: Vec<(String, String)>,
     body: Vec<u8>,
 }
 
@@ -30,9 +39,6 @@ struct Inner {
     fallback: Option<wreq::Client>,
     tx: mpsc::Sender<Job>,
     last_good: AtomicU8,
-    /// Kullanıcının tarayıcıdan aldığı cf_clearance bileti. Boşsa takılmaz.
-    /// Değer ASLA log'a yazılmaz.
-    cf_clearance: Mutex<String>,
 }
 
 #[derive(Clone)]
@@ -55,6 +61,21 @@ impl Resp {
 
     pub fn content_length(&self) -> Option<u64> {
         self.raw.content_length
+    }
+
+    /// Yanıt başlıkları (Set-Cookie gibi çoklayanlar dahil).
+    pub fn headers(&self) -> &[(String, String)] {
+        &self.raw.headers
+    }
+
+    /// Ada göre yanıt başlık değerleri (büyük/küçük harf duyarsız).
+    pub fn header_all(&self, name: &str) -> Vec<String> {
+        self.raw
+            .headers
+            .iter()
+            .filter(|(k, _)| k.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.clone())
+            .collect()
     }
 
     pub fn error_for_status(self) -> Result<Self, String> {
@@ -126,7 +147,7 @@ impl ReqB<'_> {
     }
 }
 
-fn exec_on(rt: &tokio::runtime::Runtime, client: &wreq::Client, spec: &Spec, clearance: &str) -> Result<RawResp, String> {
+fn exec_on(rt: &tokio::runtime::Runtime, client: &wreq::Client, spec: &Spec) -> Result<RawResp, String> {
     let mut url = spec.url.clone();
     if let Some(q) = &spec.query {
         if !q.is_empty() {
@@ -143,14 +164,20 @@ fn exec_on(rt: &tokio::runtime::Runtime, client: &wreq::Client, spec: &Spec, cle
         Method::Post => client.post(&url),
         Method::Head => client.head(&url),
     };
+    // Default browser headers for Cloudflare bypass
+    rb = rb
+        .header("user-agent", USER_AGENT)
+        .header("sec-ch-ua", SEC_CH_UA)
+        .header("sec-ch-ua-mobile", SEC_CH_UA_MOBILE)
+        .header("sec-ch-ua-platform", SEC_CH_UA_PLATFORM)
+        .header("referer", REFERER)
+        .header("accept-language", ACCEPT_LANGUAGE)
+        .header("sec-fetch-site", "same-origin")
+        .header("sec-fetch-mode", "cors")
+        .header("sec-fetch-dest", "empty")
+        .header("accept", "application/json, text/plain, */*");
     for (k, v) in &spec.headers {
         rb = rb.header(k, v);
-    }
-    for (k, v) in browser_headers_for(&url, &spec.headers) {
-        rb = rb.header(&k, &v);
-    }
-    if let Some(c) = cookie_header_for(&url, &spec.headers, clearance) {
-        rb = rb.header("Cookie", &c);
     }
     if let Some(j) = &spec.json_body {
         let body = serde_json::to_vec(j).map_err(|e| e.to_string())?;
@@ -164,11 +191,19 @@ fn exec_on(rt: &tokio::runtime::Runtime, client: &wreq::Client, spec: &Spec, cle
     let status = resp.status().as_u16();
     let final_url = resp.uri().to_string();
     let content_length = resp.content_length();
+    let mut headers: Vec<(String, String)> = Vec::new();
+    for (k, v) in resp.headers().iter() {
+        headers.push((
+            k.as_str().to_string(),
+            v.to_str().unwrap_or_default().to_string(),
+        ));
+    }
     let body = rt.block_on(resp.bytes()).map_err(|e| e.to_string())?.to_vec();
     Ok(RawResp {
         status,
         url: final_url,
         content_length,
+        headers,
         body,
     })
 }
@@ -182,8 +217,7 @@ fn exec_cascade(rt: &tokio::runtime::Runtime, inner: &Inner, spec: &Spec) -> Res
 
     let mut last: Option<Result<RawResp, String>> = None;
     for (idx, client) in order.iter().take(if inner.fallback.is_some() { 2 } else { 1 }) {
-        let clearance = inner.cf_clearance.lock().map(|g| g.clone()).unwrap_or_default();
-        let res = exec_on(rt, client, &spec, &clearance);
+        let res = exec_on(rt, client, &spec);
         match &res {
             Ok(r) if r.status != 403 => {
                 inner.last_good.store(*idx, Ordering::Relaxed);
@@ -222,8 +256,16 @@ impl Http {
             b.build().map_err(|e| e.to_string())
         };
         let primary = mk(None)?;
+        // Yedek proxy (VPN tüneli) kurulamazsa uygulamayı öldürme;
+        // birincil istemciyle proxysiz devam et.
         let fallback = match tunnel_proxy {
-            Some(_) => Some(mk(tunnel_proxy)?),
+            Some(_) => match mk(tunnel_proxy) {
+                Ok(c) => Some(c),
+                Err(e) => {
+                    eprintln!("[HTTP] yedek proxy kurulamadı, proxysiz devam: {e}");
+                    None
+                }
+            },
             None => None,
         };
         let (tx, rx) = mpsc::channel::<Job>();
@@ -247,20 +289,8 @@ impl Http {
                 fallback: rt_fallback,
                 tx,
                 last_good: AtomicU8::new(0),
-                cf_clearance: Mutex::new(String::new()),
             }),
         })
-    }
-
-    /// Cloudflare biletini kaydeder (boş string temizler). Log'a yazılmaz.
-    pub fn set_cf_clearance(&self, v: &str) {
-        let v = v.trim();
-        if v.len() > 4096 {
-            return;
-        }
-        if let Ok(mut g) = self.inner.cf_clearance.lock() {
-            *g = v.to_string();
-        }
     }
 
     pub fn get(&self, url: impl Into<String>) -> ReqB<'_> {
@@ -303,117 +333,5 @@ impl Http {
                 timeout_secs: None,
             },
         }
-    }
-}
-
-/// animecix.tv'ye giden API isteklerine tarayıcı başlık seti üretir.
-/// Video-host'larına (sibnet/tau/streamtape) dokunulmaz: onların kendi
-/// referer/koruma mantığı var. Çağrı noktasında verilen başlıklar korunur.
-///
-/// NOT: UA + Sec-CH-UA* taklit katmanına aittir (tutarlı sürüm için);
-/// buraya eklenmez. Origin de eklenmez (gerçek same-origin GET fetch'i
-/// Origin göndermez). Sadece fetch-bağlamı + dil + referer verilir.
-fn browser_headers_for(url: &str, existing: &[(String, String)]) -> Vec<(String, String)> {
-    const DEFAULTS: [(&str, &str); 5] = [
-        ("Referer", "https://animecix.tv/"),
-        ("Accept-Language", "tr-TR,tr;q=0.9,en;q=0.8"),
-        ("Sec-Fetch-Dest", "empty"),
-        ("Sec-Fetch-Mode", "cors"),
-        ("Sec-Fetch-Site", "same-origin"),
-    ];
-    let host = url
-        .split("//")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("");
-    if host != "animecix.tv" {
-        return Vec::new();
-    }
-    DEFAULTS
-        .iter()
-        .filter(|(k, _)| {
-            !existing
-                .iter()
-                .any(|(ek, _)| ek.eq_ignore_ascii_case(k))
-        })
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect()
-}
-
-/// animecix.tv isteklerine takılacak Cookie başlığının değerini üretir.
-/// Boş bilet, video-host'ları ve çağrıda zaten Cookie varsa None döner.
-fn cookie_header_for(
-    url: &str,
-    existing: &[(String, String)],
-    clearance: &str,
-) -> Option<String> {
-    if clearance.is_empty() {
-        return None;
-    }
-    let host = url
-        .split("//")
-        .nth(1)
-        .unwrap_or("")
-        .split('/')
-        .next()
-        .unwrap_or("");
-    if host != "animecix.tv" {
-        return None;
-    }
-    if existing
-        .iter()
-        .any(|(ek, _)| ek.eq_ignore_ascii_case("cookie"))
-    {
-        return None;
-    }
-    Some(format!("cf_clearance={clearance}"))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{browser_headers_for, cookie_header_for};
-
-    #[test]
-    fn animecix_api_gets_browser_headers() {
-        let h = browser_headers_for("https://animecix.tv/secure/search/frieren", &[]);
-        let get = |k: &str| h.iter().find(|(ek, _)| ek == k).map(|(_, v)| v.clone());
-        assert_eq!(get("Referer").as_deref(), Some("https://animecix.tv/"));
-        assert_eq!(get("Sec-Fetch-Site").as_deref(), Some("same-origin"));
-        assert_eq!(get("Sec-Fetch-Mode").as_deref(), Some("cors"));
-        assert!(get("Sec-CH-UA").is_none(), "UA ipuçları taklite ait");
-        assert!(get("Origin").is_none(), "GET fetch Origin taşımaz");
-        assert_eq!(h.len(), 5);
-    }
-
-    #[test]
-    fn explicit_headers_win() {
-        let existing = vec![("Referer".to_string(), "https://ornek/".to_string())];
-        let h = browser_headers_for("https://animecix.tv/secure/search/x", &existing);
-        assert_eq!(h.len(), 4);
-        assert!(h.iter().all(|(k, _)| k != "Referer"));
-    }
-
-    #[test]
-    fn video_hosts_untouched() {
-        for u in [
-            "https://video.sibnet.ru/shell.php?videoid=1",
-            "https://tau-video.xyz/api/video/abc",
-            "https://streamtape.com/e/xyz",
-        ] {
-            assert!(browser_headers_for(u, &[]).is_empty(), "{u} bozulmamalı");
-        }
-    }
-
-    #[test]
-    fn clearance_cookie_attached_to_api_only() {
-        let v = cookie_header_for("https://animecix.tv/secure/search/x", &[], "BILET123");
-        assert_eq!(v.as_deref(), Some("cf_clearance=BILET123"));
-        assert!(cookie_header_for("https://animecix.tv/secure/search/x", &[], "").is_none());
-        assert!(cookie_header_for("https://video.sibnet.ru/v/1/2.mp4", &[], "BILET123").is_none());
-        assert!(cookie_header_for("https://tau-video.xyz/api/video/a", &[], "BILET123").is_none());
-        let with_cookie = vec![("Cookie".to_string(), "a=b".to_string())];
-        assert!(cookie_header_for("https://animecix.tv/secure/search/x", &with_cookie, "BILET123").is_none());
     }
 }

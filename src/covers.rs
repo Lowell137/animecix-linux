@@ -14,11 +14,10 @@ fn ensure_size_provider(w: i32, h: i32) {
     }
 
     let css = gtk::CssProvider::new();
+    // Not: GTK CSS'te width/height/max-* geçersizdir (parser uyarısı verir);
+    // yalnızca min-* yazılır, gerçek ölçü set_size_request ile tutulur.
     css.load_from_string(&format!(
-        ".cover-fixed-{w}-{h} {{ \
-            min-width:{w}px; max-width:{w}px; \
-            min-height:{h}px; max-height:{h}px; \
-        }}"
+        ".cover-fixed-{w}-{h} {{ min-width:{w}px; min-height:{h}px; }}"
     ));
 
     if let Some(display) = gtk::gdk::Display::default() {
@@ -60,12 +59,7 @@ pub struct CoverManager {
     waiters: Rc<RefCell<HashMap<String, Vec<gtk::Picture>>>>,
     queue: Arc<Mutex<VecDeque<String>>>,
     active: Rc<Cell<usize>>,
-    /// L1 LRU sırası (önde eski). Negatif (None) girdiler de dahildir.
-    order: Rc<RefCell<VecDeque<String>>>,
 }
-
-/// Çözümlü kapak üst sınırı (~150 adet, 140x210x4 ile <20MB).
-const MAX_L1_COVERS: usize = 150;
 
 impl CoverManager {
     pub fn new(client: Arc<Client>) -> Self {
@@ -75,7 +69,6 @@ impl CoverManager {
             waiters: Rc::new(RefCell::new(HashMap::new())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             active: Rc::new(Cell::new(0)),
-            order: Rc::new(RefCell::new(VecDeque::new())),
         }
     }
 
@@ -86,23 +79,6 @@ impl CoverManager {
             waiters: self.waiters.clone(),
             queue: self.queue.clone(),
             active: self.active.clone(),
-            order: self.order.clone(),
-        }
-    }
-
-    /// LRU dokunuşu: anahtarı sona al, taşanı at.
-    fn lru_touch(&self, key: &str) {
-        let mut order = self.order.borrow_mut();
-        if let Some(pos) = order.iter().position(|k| k == key) {
-            order.remove(pos);
-        }
-        order.push_back(key.to_string());
-        while order.len() > MAX_L1_COVERS {
-            if let Some(old) = order.pop_front() {
-                self.cache.borrow_mut().remove(&old);
-            } else {
-                break;
-            }
         }
     }
 
@@ -122,13 +98,30 @@ impl CoverManager {
 
     pub fn load_cover(&self, url: Option<&str>, pic: &gtk::Picture, w: i32, h: i32) {
         let Some(url) = url else { return };
-        let url = Self::thumb_url(&url, false);
+        self.load_cover_impl(&Self::thumb_url(&url, false), pic, w, h);
+    }
+
+    /// Spot ışığı için tam boy (w1280) yükleme. TMDB dışı URL'ler
+    /// olduğu gibi geçer (haber görselleri).
+    pub fn cover_picture_hero(&self, url: Option<&str>, w: i32, h: i32) -> gtk::Picture {
+        let pic = new_sized_picture(w, h);
+        if let Some(url) = url {
+            let big = url
+                .replace("image.tmdb.org/t/p/original", "image.tmdb.org/t/p/w1280")
+                .replace("image.tmdb.org/t/p/w500", "image.tmdb.org/t/p/w1280")
+                .replace("image.tmdb.org/t/p/w342", "image.tmdb.org/t/p/w780")
+                .replace("image.tmdb.org/t/p/w185", "image.tmdb.org/t/p/w780");
+            self.load_cover_impl(&big, &pic, w, h);
+        }
+        pic
+    }
+
+    fn load_cover_impl(&self, url: &str, pic: &gtk::Picture, w: i32, h: i32) {
+        let url = url.to_string();
         let key = format!("{url}@{w}x{h}");
 
         if let Some(Some(t)) = self.cache.borrow().get(&key) {
-            let t = t.clone();
-            self.lru_touch(&key);
-            pic.set_paintable(Some(&t));
+            pic.set_paintable(Some(t));
             return;
         }
         if let Some(None) = self.cache.borrow().get(&key) {
@@ -149,8 +142,27 @@ impl CoverManager {
         loader.write(bytes).ok()?;
         loader.close().ok()?;
         let src = loader.pixbuf()?;
-        let pb = src.scale_simple(w, h, gdk_pixbuf::InterpType::Nearest)?;
-        Some(gtk::gdk::Texture::for_pixbuf(&pb))
+        // Oranı koru: hedefi dolduracak şekilde büyüt, ortadan kırp.
+        // (Yoksa banner gibi farklı oranlı hedeflerde resim gerilir.)
+        let (sw, sh) = (src.width() as f64, src.height() as f64);
+        if sw <= 0.0 || sh <= 0.0 {
+            return None;
+        }
+        let scale = (w as f64 / sw).max(h as f64 / sh);
+        let dw = (sw * scale).ceil() as i32;
+        let dh = (sh * scale).ceil() as i32;
+        let big = src.scale_simple(dw.max(1), dh.max(1), gdk_pixbuf::InterpType::Bilinear)?;
+        let x = ((dw - w) / 2).max(0);
+        let y = ((dh - h) / 2).max(0);
+        let cw = w.min(dw).max(1);
+        let ch = h.min(dh).max(1);
+        if x + cw > dw || y + ch > dh {
+            return None;
+        }
+        let cropped = big.new_subpixbuf(x, y, cw, ch);
+        // Hedef küçükse köşede kalmasın diye ortaya yerleştirilemez
+        // (texture tam boyutta) — boyutlar zaten hedefe eşit.
+        Some(gtk::gdk::Texture::for_pixbuf(&cropped))
     }
 
     fn pump_covers(&self) {
@@ -193,6 +205,10 @@ impl CoverManager {
 
         if let Some(b) = &bytes {
             let mut cache = self.cache.borrow_mut();
+            if cache.len() > 40 {
+                cache.clear();
+            }
+
             for (key, pics) in waiters.iter() {
                 let Some(rest) = key.strip_prefix(url) else { continue };
                 let Some(rest) = rest.strip_prefix('@') else { continue };
@@ -208,10 +224,6 @@ impl CoverManager {
                 }
                 keys_to_remove.push(key.clone());
             }
-            drop(cache);
-            for k in &keys_to_remove {
-                self.lru_touch(k);
-            }
         } else {
             let mut cache = self.cache.borrow_mut();
             for (key, _) in waiters.iter() {
@@ -219,10 +231,6 @@ impl CoverManager {
                     cache.insert(key.clone(), None);
                     keys_to_remove.push(key.clone());
                 }
-            }
-            drop(cache);
-            for k in &keys_to_remove {
-                self.lru_touch(k);
             }
         }
 

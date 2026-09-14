@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://veilzon.github.io/animecix-linux/sitemap.xml
+Sitemap: https://nyx47rd.github.io/animecix/sitemap.xml

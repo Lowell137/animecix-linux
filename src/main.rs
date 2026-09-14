@@ -1,18 +1,19 @@
 mod api;
 mod app;
 mod aria;
+mod auth;
 mod covers;
 mod download;
-mod font;
+mod embed_mpv;
 mod http;
-mod music;
-mod play_quality;
 mod player;
+mod player_window;
+mod play_quality;
 mod segmented;
-mod skip;
-mod theme;
 mod ui;
 mod update;
+mod vpn;
+mod xeh;
 
 use app::App;
 use adw::prelude::*;
@@ -31,6 +32,62 @@ const ANIMECIX_SVG_ICON: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
   <rect width="256" height="256" rx="48" fill="url(#g)"/>
   <path d="M70 200 L128 56 L186 200 L160 200 L148 168 L108 168 L96 200 Z M116 148 L140 148 L128 116 Z" fill="#ffffff"/>
 </svg>"##;
+
+/// Özel yan-menü ikonlarını tema rengine göre hicolor'a kurar
+/// (koyu temada açık, açık temada koyu çizgi).
+fn ensure_sidebar_icon() {
+    const OPEN_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-sidebar-symbolic.svg");
+    const COLLAPSED_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-sidebar-collapse-symbolic.svg");
+    const NEWS_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-news-symbolic.svg");
+    const SEARCH_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-search-symbolic.svg");
+    let dark = adw::StyleManager::default().is_dark();
+    let fill = if dark { "#e8e8e8" } else { "#222222" };
+    let home = std::env::var("HOME").unwrap_or_default();
+    if home.is_empty() {
+        return;
+    }
+    let dir = format!("{home}/.local/share/icons/hicolor/scalable/actions");
+    let mut changed = false;
+    for (name, src) in [
+        ("animecix-sidebar-symbolic.svg", OPEN_SVG),
+        ("animecix-sidebar-collapse-symbolic.svg", COLLAPSED_SVG),
+        ("animecix-news-symbolic.svg", NEWS_SVG),
+        ("animecix-search-symbolic.svg", SEARCH_SVG),
+    ] {
+        let content = src.replace("#222222", fill);
+        let path = format!("{dir}/{name}");
+        let same = std::fs::read_to_string(&path).ok() == Some(content.clone());
+        if !same {
+            if std::fs::create_dir_all(&dir).is_ok() {
+                if std::fs::write(&path, content.as_bytes()).is_ok() {
+                    changed = true;
+                }
+            }
+        }
+    }
+    // Yeni eklenen ikon, bayat icon-theme.cache tarafından gölgeleniyorsa
+    // GTK onu bulamaz (boş/bozuk görünür) — önbelleği tazele ya da sil.
+    if changed {
+        refresh_hicolor_cache(&format!("{home}/.local/share/icons/hicolor"));
+    }
+}
+
+/// `~/.local/share/icons/hicolor` önbelleğini tazeler; araç yoksa
+/// bayat `icon-theme.cache` dosyasını siler (GTK dizini tarar, zararsız).
+fn refresh_hicolor_cache(hicolor_dir: &str) {
+    let cache = format!("{hicolor_dir}/icon-theme.cache");
+    if !std::path::Path::new(&cache).exists() {
+        return;
+    }
+    let updated = std::process::Command::new("gtk-update-icon-cache")
+        .args(["-f", "-t", hicolor_dir])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !updated {
+        let _ = std::fs::remove_file(&cache);
+    }
+}
 
 pub fn restart_app() {
     let exe = std::env::var("APPIMAGE")
@@ -62,6 +119,8 @@ fn main() {
         if a == "--goto" {
             let _ = it.next(); // değeri atla
         } else if a.starts_with("--goto=") {
+        } else if a == "--dump-layout" {
+            // teşhis bayrağı GTK'ya gitmesin, env'den okunur
         } else {
             filtered.push(a.clone());
         }
@@ -81,6 +140,11 @@ fn main() {
     app.connect_activate(|app| {
         let mut migrated = false;
         if let Some(display) = gtk::gdk::Display::default() {
+            // İkonlar her zaman Adwaita olsun: sistem teması (örn. macOS
+            // klonu) medya kontrol gliflerini bozuyor/kendi tarzına
+            // çeviriyor. Uygulama zaten libadwaita tabanlı.
+            gtk::Settings::for_display(&display).set_gtk_icon_theme_name(Some("Adwaita"));
+            ensure_sidebar_icon();
             let mut base = std::path::PathBuf::new();
             if let Ok(exe) = std::env::current_exe() {
                 if let Some(dir) = exe.parent() {
@@ -122,55 +186,77 @@ fn main() {
                     transition: transform 150ms ease, box-shadow 150ms ease;
                 }
 
-                /* === Kart Hover: parlama + hafif büyüme === */
-                .title-btn:hover {
-                    cursor: pointer;
+                /* === Yan menü satırları === */
+                .side-row {
+                    border-radius: 10px;
                 }
-                .title-btn:hover .cover {
-                    transform: scale(1.04);
-                    box-shadow: 0 0 22px 3px alpha(@accent_color, 0.55);
+                .side-selected {
+                    background-color: alpha(currentColor, 0.13);
+                }
+
+                /* === Rozetler (puan / bölüm) === */
+                .badge {
+                    background-color: rgba(0, 0, 0, 0.68);
+                    color: white;
+                    border-radius: 8px;
+                    padding: 1px 8px;
+                    font-size: 0.72em;
+                    font-weight: 600;
+                }
+
+                /* === Hero banner === */
+                .hero-card {
+                    border-radius: 18px;
+                }
+                .hero-clip {
+                    border-radius: 18px;
+                }
+                .hero-clip > picture {
+                    border-radius: 18px;
+                }
+                .hero-shade {
+                    background: linear-gradient(to top, rgba(0,0,0,0.92), rgba(0,0,0,0.55) 55%, rgba(0,0,0,0.15) 80%, rgba(0,0,0,0.0));
+                    border-radius: 0 0 18px 18px;
+                    padding: 14px 20px 16px 20px;
+                }
+                .hero-genre {
+                    color: @accent_color;
+                    font-weight: 700;
+                }
+
+                /* === Kart Hover: sadece poster kalkar, yazılar sabit kalır === */
+                /* (hover kartta yakalanıp overlay'e class olarak basılır) */
+                .poster-lift {
+                    transition: transform 140ms ease;
+                }
+                .poster-lift.lifted {
+                    transform: translateY(-3px);
                 }
 
                 .cover-thumb {
                     min-width: 48px;
-                    max-width: 48px;
                     min-height: 72px;
-                    max-height: 72px;
                 }
 
                 .cover-header {
-                    min-width: 120px;
-                    max-width: 120px;
-                    min-height: 180px;
-                    max-height: 180px;
-                }
+    min-width: 120px;
+    min-height: 180px;
+}
 
                 .cover-movie-header {
                     min-width: 160px;
-                    max-width: 160px;
                     min-height: 240px;
-                    max-height: 240px;
                 }
 
                 .cover-shelf {
                     min-width: 140px;
-                    max-width: 140px;
                     min-height: 210px;
-                    max-height: 210px;
                 }
 
-                /* === Kart Hover Animasyonu === */
+                /* === Kart: hover'da hiçbir şey kımıldamaz (sadece poster .lifted ile kalkar) === */
                 .title-btn {
                     padding: 4px;
                     border-radius: 12px;
-                    transition: transform 140ms ease, background-color 140ms ease;
-                }
-                .title-btn:hover {
-                    transform: scale(1.04);
-                    background-color: alpha(currentColor, 0.08);
-                }
-                .title-btn:active {
-                    transform: scale(0.97);
                 }
 
                 /* === Dizi Detay Kartı === */
@@ -204,37 +290,54 @@ fn main() {
                     font-size: 0.9em;
                 }
 
+                /* === Hızlı arama hapı (ana sayfa üstü) === */
+                .quick-search {
+                    border-radius: 999px;
+                    padding: 2px 14px;
+                    background: rgba(20, 20, 28, 0.85);
+                    border: 1px solid alpha(currentColor, 0.12);
+                    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+                }
+
+                /* === Sayfa pager butonları (ızgara kenarında) === */
+                .grid-pager-btn {
+                    margin-left: 24px;
+                    margin-right: -8px;
+                }
+                .grid-pager-btn:first-child {
+                    margin-left: 0px;
+                }
+                .grid-pager-btn:last-child {
+                    margin-right: 0px;
+                }
+
+                /* === Dock mini butonlar (daraltılmış üst bar) === */
+                .dock-mini {
+                    min-width: 24px;
+                    min-height: 24px;
+                    padding: 2px;
+                }
+
+                /* === Dock alt yazıları === */
+                .side-caption {
+                    font-size: 0.68em;
+                    color: alpha(currentColor, 0.65);
+                }
+
                 /* === Kart Başlık Yazısı === */
                 .card-title {
                     font-weight: 600;
                     font-size: 0.85em;
-                    text-align: center;
                     margin-top: 2px;
                 }
 
-                /* === Raf Başlıkları: büyük + nefes alan parlaklık === */
-                @keyframes shelf-breathe {
-                    0%, 100% { opacity: 0.72; }
-                    50% { opacity: 1.0; }
-                }
+                /* === Raf Başlıkları: düz, ortalı, parlama yok === */
                 .shelf-title {
                     font-size: 1.02em;
                     font-weight: 800;
                     letter-spacing: 0.1em;
                     text-transform: uppercase;
                     color: @accent_color;
-                    opacity: 0.9;
-                    text-shadow: 0 0 14px alpha(@accent_color, 0.35);
-                    animation-name: shelf-breathe;
-                    animation-duration: 3.2s;
-                    animation-timing-function: ease-in-out;
-                    animation-iteration-count: infinite;
-                }
-
-                /* === Koyu temalarda sabit okunaklı raf başlığı (temaya sadık değil) === */
-                .theme-dark .shelf-title {
-                    color: #FFFFFF;
-                    text-shadow: 0 1px 4px alpha(black, 0.85);
                 }
 
                 /* === Arayüz Ölçeği (Ayarlar > Görünüm) === */
@@ -251,11 +354,21 @@ fn main() {
                 }
                 .movie-play-btn { font-size: 1.1em; padding: 12px 36px; font-weight: 700; }
 
+                /* === HeaderBar Navigasyon Butonları === */
+                .header-nav-btn {
+                    border-radius: 20px;
+                    padding: 4px 10px;
+                    font-size: 0.88em;
+                    transition: background-color 120ms;
+                }
+                .header-nav-btn:hover {
+                    background-color: alpha(currentColor, 0.1);
+                }
+
                 /* === Bookmark Butonu (eski floating) === */
-                .lg-icon { -gtk-icon-size: 26px; }
+                .lg-icon { -gtk-icon-size: 20px; }
                 .bookmark-btn {
                     background-color: alpha(black, 0.55);
-                    backdrop-filter: blur(8px);
                     border-radius: 20px;
                     transition: background-color 120ms, transform 120ms;
                 }
@@ -272,99 +385,45 @@ fn main() {
                     transform: scale(1.15);
                 }
 
-                /* === Bölüm Listesi Paneli: oluklar panelde erir, siyah çerçeve biter === */
-                /* NOT: GtkListBox'un CSS düğümü `list`tir (`listbox` ölü kural olur). */
-                list.content-list {
-                    background-color: alpha(@row_tint, 0.04);
-                    border: none;
-                    box-shadow: none;
-                    border-radius: 14px;
-                    padding: 6px 8px;
+                /* === Filtre çipleri (kompakt) === */
+                .filter-chip {
+                    padding: 3px 10px;
+                    font-size: 0.9em;
                 }
-                list.content-list > separator {
-                    background-color: transparent;
-                    opacity: 0;
+
+                /* === Sezon Sekmeleri (kompakt) === */
+                .season-tab {
+                    padding: 1px 14px;
+                    min-height: 0;
+                    font-size: 0.9em;
                 }
+
+                /* === ListBox İçerik Satırları === */
                 .content-list > row {
-                    background-color: alpha(@row_tint, 0.10);
-                    border: none;
-                    outline: none;
-                    box-shadow: none;
-                    border-radius: 10px;
-                    margin: 3px 0;
-                    transition: background-color 120ms ease;
+                    border-radius: 6px;
+                    transition: background-color 120ms ease, transform 100ms ease;
                 }
                 .content-list > row:hover {
-                    background-color: alpha(@row_tint, 0.17);
+                    background-color: alpha(currentColor, 0.06);
                 }
-                .content-list > row:focus-visible {
-                    background-color: alpha(@row_tint, 0.22);
-                    outline: none;
-                }
-                .content-list > row:selected,
-                .content-list > row:selected:focus {
-                    background-color: alpha(@row_tint, 0.28);
-                    outline: none;
-                    box-shadow: none;
-                }
-
-                /* === Şeffaf kaydırma: viewport dahil tema görünür === */
-                .clear-scroll,
-                .clear-scroll viewport,
-                .clear-scroll list:not(.content-list),
-                .clear-scroll list:not(.content-list) > row,
-                .clear-scroll flowbox {
-                    background-color: transparent;
-                    background-image: none;
-                    border: none;
-                    box-shadow: none;
-                }
-
-                /* === Yüzen indirme hapı: kapsül kabı, düğmeleri sarar === */
-                .dl-float-pill {
-                    background-color: alpha(@card_bg_color, 0.95);
-                    color: @card_fg_color;
-                    border: 1px solid alpha(currentColor, 0.12);
-                    border-radius: 9999px;
-                    padding: 6px;
-                    box-shadow: 0 4px 18px alpha(black, 0.45);
-                }
-                .dl-float-pill button.pill {
-                    margin: 0;
-                }
-
-                /* === Bölüm kaydırıcısı: kenar gölgesi şeridi + hap altı boşluk === */
-                scrolledwindow.clear-scroll undershoot.top,
-                scrolledwindow.clear-scroll undershoot.bottom,
-                scrolledwindow.clear-scroll overshoot.top,
-                scrolledwindow.clear-scroll overshoot.bottom {
-                    background: none;
-                    background-image: none;
-                    box-shadow: none;
-                    border: none;
-                }
-                scrolledwindow.clear-scroll scrollbar {
-                    background: transparent;
-                    border: none;
-                }
-                scrolledwindow.clear-scroll viewport {
-                    padding-bottom: 72px;
+                .content-list > row:selected {
+                    background-color: alpha(@accent_color, 0.15);
                 }
 
                 /* === İzleme Maratonu Zengin Tasarım Stilleri === */
-                list.marathon-list-box {
+                listbox.marathon-list-box {
                     background: transparent;
                 }
-                list.marathon-list-box > row {
+                listbox.marathon-list-box > row {
                     background: transparent;
                     border: none;
                     padding: 0;
                     margin: 0;
                     box-shadow: none;
                 }
-                list.marathon-list-box > row:hover,
-                list.marathon-list-box > row:selected,
-                list.marathon-list-box > row:focus {
+                listbox.marathon-list-box > row:hover,
+                listbox.marathon-list-box > row:selected,
+                listbox.marathon-list-box > row:focus {
                     background: transparent;
                 }
 
@@ -392,7 +451,6 @@ fn main() {
                     border-radius: 14px;
                     padding: 12px 16px;
                     margin-bottom: 8px;
-                    cursor: grab;
                     transition: background-color 140ms ease, border-color 140ms ease;
                 }
                 .marathon-item-card:hover {
@@ -400,7 +458,6 @@ fn main() {
                     border-color: alpha(@accent_color, 0.3);
                 }
                 .marathon-item-card:active {
-                    cursor: grabbing;
                 }
                 .marathon-item-card:drop(active) {
                     border-color: @accent_color;
@@ -423,11 +480,8 @@ fn main() {
                 .marathon-index {
                     min-width: 26px;
                     min-height: 26px;
-                    padding: 2px 8px;
+                    padding: 0 4px;
                     color: @accent_color;
-                    background-color: alpha(@accent_color, 0.12);
-                    border: 1px solid alpha(@accent_color, 0.45);
-                    border-radius: 9px;
                     font-weight: 700;
                     font-size: 13px;
                 }
@@ -456,9 +510,9 @@ fn main() {
                 }
 
                 .status-badge-progress {
-                    background-color: alpha(@accent_color, 0.22);
+                    background-color: alpha(@accent_color, 0.18);
                     color: @accent_color;
-                    border: 1px solid alpha(@accent_color, 0.6);
+                    border: 1px solid alpha(@accent_color, 0.35);
                     border-radius: 12px;
                     padding: 2px 10px;
                     font-size: 0.82em;
@@ -506,6 +560,40 @@ fn main() {
             }
         }
         let app_inst = App::new(app);
+        // Teşhis bayrağı: yerleşim ölçülerini dök.
+        if std::env::args().any(|a| a == "--dump-layout") {
+            let inst_c = app_inst.clone_ref();
+            glib::timeout_add_local_once(
+                std::time::Duration::from_secs(4),
+                move || {
+                    use gtk::prelude::WidgetExt;
+                    let win = inst_c.window.allocation();
+                    let side = inst_c.sidebar.allocation();
+                    let (smin, snat, _, _) = inst_c.sidebar.measure(gtk::Orientation::Horizontal, -1);
+                    let (tmin, tnat, _, _) = inst_c.stack.measure(gtk::Orientation::Horizontal, -1);
+                    let ta = inst_c.stack.allocation();
+                    eprintln!(
+                        "[LAYOUT] pencere={}x{} cols={} sidebar={}x{} min={} nat={} | stack={}px min={} nat={}",
+                        win.width(),
+                        win.height(),
+                        inst_c.grid_cols.get(),
+                        side.width(),
+                        side.height(),
+                        smin,
+                        snat,
+                        ta.width(),
+                        tmin,
+                        tnat,
+                    );
+                    for it in inst_c.side_items.borrow().iter() {
+                        let a = it.btn.allocation();
+                        let (bmin, _bnat, _, _) = it.btn.measure(gtk::Orientation::Horizontal, -1);
+                        let (lmin, _lnat, _, _) = it.label.measure(gtk::Orientation::Horizontal, -1);
+                        eprintln!("[LAYOUT] satir={} btn={}px btnmin={} lblmin={}", it.tip, a.width(), bmin, lmin);
+                    }
+                },
+            );
+        }
         {
             let sweep_client = app_inst.client.clone();
             std::thread::spawn(move || sweep_client.sweep_expired_covers());

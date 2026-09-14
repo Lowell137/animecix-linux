@@ -1,8 +1,8 @@
-# AnimeciX Linux
+# AnimeciX
 
-[![Web](https://img.shields.io/badge/Web-veilzon.github.io%2Fanimecix--linux-0969da?style=flat-square)](https://veilzon.github.io/animecix-linux/)
-[![Releases](https://img.shields.io/github/v/release/veilzon/animecix-linux?style=flat-square)](https://github.com/veilzon/animecix-linux/releases/latest)
-[![License: MIT](https://img.shields.io/github/license/veilzon/animecix-linux?style=flat-square)](LICENSE)
+[![Web](https://img.shields.io/badge/Web-lowell137.github.io%2Fanimecix-0969da?style=flat-square)](https://lowell137.github.io/animecix/)
+[![Releases](https://img.shields.io/github/v/release/Lowell137/animecix-linux?style=flat-square)](https://github.com/Lowell137/animecix-linux/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
 
 <img src="assets/hicolor/256x256/apps/tr.com.animecix.png" align="right" width="96" height="96" alt="AnimeciX">
 
@@ -18,42 +18,39 @@ kontrol eder ve kendini otomatik güncelleyebilir.
 
 ## Özellikler
 
-- **İndirme yöneticisi**: bölüm ve film indirme; 6 bağlantıyla hızlı indirme, kaldığı yerden devam, toplu indirme sihirbazı
-- **Sayfalar menüsü**: Ana Sayfa, Favoriler, Maraton, Geçmiş, İndirilenler ve Ayarlar tek menüde; Ctrl+T ile anında erişim (kısayol değiştirilebilir)
-- **5 koyu tema**: Koyu, Bordo, Orman, Lacivert, Mor; karşılama ekranında canlı önizleme
-- **Hızlı arama**: ana ekranda ortalı arama çubuğu (Ctrl+S); bölüm ekranında hızlı bölüm arama
-- **Oynatıcı**: MPV ile oynatma, otomatik tam ekran, resmi intro/outro atlama (S/E), çalan şarkı bilgisi ve Shift+M ile tarayıcıda açma, isteğe bağlı oynatma kalite seçici
-- **Takip**: Favoriler, sürükle-bırak sıralamalı Maraton, izleme Geçmişi, kaldığın yerden devam
-- **Akıllı kaynak seçimi**: kaynaklar paralel çözülür, en kalitelisi seçilir; ölü kaynak elenir, açılmayan kaynakta sonrakine geçilir. manuel kaynak seçimi mevcuttur.
-- **Otomatik güncelleme**: AppImage sürümü başlatmada yeni sürümü denetler, tek tıkla günceller
-- **Kurulum sihirbazı**: bağımlılık kontrolü ve masaüstü başlatıcı kurulumu
-- **Ayarlar**: tema, kısayollar, indirme klasörü, masaüstü başlatıcı, veri sıfırlama
-- **Hızlı yükleme**: HTTP/2 multiplexing, bağlantı havuzu (keep-alive) ve DNS önbelleği;
+- 🏠 **Ana Sayfa**: kategorilere göre anime/dizi/film listeleri
+- 🔎 **Arama**: ana ekranda kısayol tuşu ile hızlı arama; bölüm ekranında hızlı bölüm arama
+- ▶️ **Oynatıcı**: MPV ile oynatma, 2 dakikalık önbellek, otomatik tam ekran, **AniSkip** intro/outro atlama
+- ⭐ **Favoriler**: beğendiğin başlıkları koleksiyonuna ekle
+- 🏃 **Maraton**: izleme listesi — sürükle-bırak ile sıralama ve bölüm ilerleme takibi
+- 🕘 **Geçmiş**: izlediğin bölümlerin geçmişi
+- ⚙️ **Ayarlar**: masaüstü başlatıcı entegrasyonu, veri sıfırlama, kısayollar
+- 📦 **Kurulum Sihirbazı**: bağımlılık kontrolü ve masaüstü menüsüne kurulum
+- 🔄 **Otomatik Güncelleme**: AppImage sürümünde başlatmada kendini güncelleyebilir
+- 🎯 **Akıllı kaynak seçimi**: tüm kaynaklar paralel çözülür, en kalitelisi (dosya boyutuna göre) seçilir;
+  ölü/pasif kaynaklar elenir, açılmayan kaynağa denk gelirse sonraki kaynağa kendiliğinden geçer
+- 🛡️ **VPN proxy desteği** (isteğe bağlı): yerelde çalışan bir proxy varsa
+  (`127.0.0.1:10808`, ör. sing-box + ProtonVPN WireGuard) video trafiğini oradan çıkarır ve
+  ISS kısıtlamalarını aşar; proxy kapalıysa uygulama normal çalışır, hiçbir şey bozulmaz
+- ⚡ **Hızlı yükleme**: HTTP/2 multiplexing, bağlantı havuzu (keep-alive) ve DNS önbelleği;
   kapak görselleri paralel (12 worker) indirilir
 
 ---
 
 ## Ekran Görüntüleri
 
-<p align="center">
-  <img src="screenshots/temalar.png" width="100%">
-  <b>5 koyu tema: Koyu, Bordo, Orman, Lacivert, Mor</b>
-</p>
-
 <div align="center">
 
 | | |
 |:---:|:---:|
-| <img src="screenshots/home.png" width="100%"> | <img src="screenshots/episodes.png" width="100%"> |
-| **Ana Sayfa** | **Bölümler** |
-| <img src="screenshots/film.png" width="100%"> | <img src="screenshots/favorites.png" width="100%"> |
-| **Film** | **Favoriler** |
+| <img src="screenshots/home.png" width="100%"> | <img src="screenshots/search.png" width="100%"> |
+| **🏠 Ana Sayfa** | **🔎 Arama** |
+| <img src="screenshots/episodes.png" width="100%"> | <img src="screenshots/favorites.png" width="100%"> |
+| **▶️ Bölüm İzleme** | **⭐ Favoriler** |
 | <img src="screenshots/marathon.png" width="100%"> | <img src="screenshots/history.png" width="100%"> |
-| **İzleme Maratonu** | **Geçmiş** |
-| <img src="screenshots/downloads.png" width="100%"> | <img src="screenshots/settings.png" width="100%"> |
-| **İndirilenler** | **Ayarlar** |
-| <img src="screenshots/welcome.png" width="100%"> | |
-| **Karşılama** | |
+| **🏃 İzleme Maratonu** | **🕘 Geçmiş** |
+| <img src="screenshots/settings.png" width="100%"> | <img src="screenshots/welcome.png" width="100%"> |
+| **⚙️ Ayarlar** | **👋 Karşılama** |
 
 </div>
 
@@ -61,11 +58,22 @@ kontrol eder ve kendini otomatik güncelleyebilir.
 
 ## Kurulum
 
-### AppImage (önerilen)
+### Tek komutla kur (AppImage)
 
-1. [Releases](https://github.com/veilzon/animecix-linux/releases) sayfasından `AnimeciX-x86_64.AppImage` dosyasını indirin.
+```bash
+curl -L https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage -o AnimeciX.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
+```
+
+veya `wget` ile:
+
+```bash
+wget -O AnimeciX.AppImage https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
+```
+
+### Manuel indirme
+
+1. [Releases](https://github.com/Lowell137/animecix-linux/releases) sayfasından `AnimeciX-x86_64.AppImage` dosyasını indirin.
 2. Çalıştırılabilir yapın ve açın:
-
    ```bash
    chmod +x AnimeciX-x86_64.AppImage
    ./AnimeciX-x86_64.AppImage
@@ -85,7 +93,7 @@ Gerekli sistem bağımlılıkları:
 Rust (1.74+) kurulu olmalı:
 
 ```bash
-git clone https://github.com/veilzon/animecix-linux.git
+git clone https://github.com/Lowell137/animecix-linux.git
 cd animecix-linux
 cargo build --release
 ./target/release/animecix
@@ -98,9 +106,66 @@ cargo build --release
 Uygulama bir **AppImage** olarak çalışıyorsa başlangıçta yeni sürümü kontrol eder:
 
 - **Otomatik:** *Ayarlar → Güncelleme → Otomatik Güncelleme* açıkken yeni sürüm bulunursa
-  onay kutusu çıkar; “Güncelle ve Yeniden Başlat” deyince indirir, kurar ve uygulamayı yeniden başlatır.
+  onay kutusu çıkar; "Güncelle ve Yeniden Başlat" deyince indirir, kurar ve uygulamayı yeniden başlatır.
 - **Elle:** *Ayarlar → Şimdi Güncelle* ile istediğin an kontrol edebilirsin.
-Kaynaktan derlenen sürümde otomatik güncelleme devre dışıdır.
+
+Kaynaktan derlenen sürümde otomatik güncelleme devre dışıdır (sadece AppImage için geçerlidir).
+
+---
+
+## İsteğe bağlı: Daha hızlı video (VPN proxy)
+
+> **Not:** VPN Proxy, Flatpak sürümünde bulunmaz (sandbox, host'ta süreç
+> başlatmaya izin vermez). AppImage ve AUR sürümlerinde kullanılabilir.
+
+ISS'n video trafiğini kısıtlıyorsa yerelde bir proxy çalıştırman yeterli: uygulama
+`127.0.0.1:10808` portunu görünce mpv video trafiğini **otomatik** oradan geçirir;
+proxy yoksa hiçbir şey değişmez (kırılmaz yapı).
+
+Kullanılan araç: [sing-box](https://github.com/SagerNet/sing-box) (root'suz, kullanıcı
+alanında çalışır) + [ProtonVPN](https://protonvpn.com) ücretsiz WireGuard config'i.
+
+### Kurulum (tek seferlik, ~2 dakika)
+
+1. **sing-box indir:** [GitHub Releases](https://github.com/SagerNet/sing-box/releases)
+   sayfasından **Linux x86_64** (`amd64`) `.tar.gz` dosyasını indir. Arşivi aç ve
+   binary'yi koy:
+   ```bash
+   mkdir -p ~/.local/share/singbox
+   tar xzf sing-box-*-linux-amd64.tar.gz
+   cp sing-box-*/sing-box ~/.local/share/singbox/
+   chmod +x ~/.local/share/singbox/sing-box
+   ```
+2. **ProtonVPN WireGuard config al:** protonvpn.com → Giriş → **Downloads** →
+   "WireGuard configuration" → platform **GNU/Linux** → ücretsiz ülke (ör. NL-FREE) →
+   indirilen `.conf` dosyasını şuraya kaydet:
+   ```bash
+   cp ~/İndirilenler/wireguard-config.conf ~/.local/share/singbox/config.json
+   ```
+   (Config dosya adı tam olarak `config.json` olmalı.)
+3. **Başlat:** Uygulamada **Ayarlar → VPN Proxy → Başlat**'a bas. Durum satırı
+   "Çalışıyor"a dönerse ve çıkan pencerede **Yeniden Başlat**'a basarsan API trafiği
+   (ana sayfa, arama) de tüneleden geçer — ISS engelleri tamamen aşılır. Yeniden
+   başlatmadan yalnızca video trafiği tüneleden geçer. (Terminal severler için elle
+   komut:
+   `~/.local/share/singbox/sing-box run -c ~/.local/share/singbox/config.json &`
+   — bu durumda da tünel açıldıktan sonra uygulamayı elle yeniden başlat.)
+
+### Doğrulama
+
+Durum satırı "Çalışıyor" gösteriyorsa mpv, videoları 127.0.0.1:10808 üzerinden
+çıkarır. Çıkış IP'ni kontrol etmek için:
+```bash
+curl -x socks5h://127.0.0.1:10808 https://www.gstatic.com/generate_204 -o /dev/null -w "%{http_code}\n"
+```
+`204` dönüyorsa tünel aktif demektir.
+
+### Notlar
+
+- Uygulama config'i şu sırayla arar: sing-box binary'sinin yanındaki `config.json`,
+  `~/.local/share/singbox/config.json`, `~/vpn-config.json`, `~/sing-box-config.json`.
+- Proxy'yi durdurmak için **Ayarlar → VPN Proxy → Durdur**.
+- Proxy kapatılırsa uygulama normal bağlantıya döner; hiçbir ayarın bozulmaz.
 
 ---
 
@@ -126,11 +191,9 @@ bash build_appimage.sh
 | Kısayol | İşlev |
 |---|---|
 | `/` | Bölüm ekranında hızlı bölüm arama |
-| `Ctrl+S` | Ana ekranda arama çubuğuna odaklan |
-| `Ctrl+T` | Sayfalar menüsünü aç/kapat |
-| `s` | Oynatıcıda intro sonuna atla |
-| `e` | Oynatıcıda outro sonuna atla |
-| `Shift+M` (`M`) | Çalan şarkıyı tarayıcıda aç (şarkı bilgisi varsa) |
+| `Ctrl+S` | Ana ekranda arama çubuğunu aç |
+| `s` | Oynatıcıda AniSkip ile intro sonuna atla |
+| `e` | Oynatıcıda AniSkip ile outro sonuna atla |
 | `Esc` | Geri / aramayı kapat |
 
 Kısayollar *Ayarlar* ekranından değiştirilebilir.
@@ -146,7 +209,7 @@ Tüm veriler (geçmiş, ayarlar, kapak önbelleği) şurada tutulur:
 ~/.cache/animecix/
 ```
 
-*Ayarlardan* “Tüm Verileri Sıfırla ve Temizle” ile sıfırlanabilir.
+*Ayarlardan* "Tüm Verileri Sıfırla ve Temizle" ile sıfırlanabilir.
 
 ---
 
@@ -170,19 +233,36 @@ Uygulama, ağ gecikmesini azaltmak için aşağıdaki teknikleri kullanır:
 
 ---
 
-## Resmi İntro/Outro Verisi
+## AniSkip Entegrasyonu
 
-AnimeciX, intro ve outro süreleri ile açılış/kapanış şarkı bilgilerini
-AnimeciX'in resmi video altyapısından alır.
-Video açılmadan önce çözülür; sonuç 6 saat önbelleğe alınır.
+AnimeciX, intro ve outro'ları otomatik atlamak için topluluk tarafından işletilen
+**[aniskip-mirror](https://github.com/nyx47rd/aniskip-mirror)** API'sini kullanır.
+Orijinal `api.aniskip.com` servisi 2026'da kullanım dışı kalmıştır (alan adı
+süresi dolmuş, GitHub deposu kaldırılmış), bu yüzden aynı JSON şemasına birebir
+uyumlu kendi mirror altyapımız kullanılır.
+
+**Endpoint'ler** (otomatik failover):
+
+1. **Birincil**: `https://aniskip-mirror-cf.yasar-123-sevda.workers.dev` — Cloudflare Worker
+   (R2 depolama, edge cache, 75.000+ anime verisi)
+2. **Yedek**: `https://aniskip-mirror.vercel.app`
+
+Birincil endpoint 5xx veya timeout dönerse uygulama saydam biçimde yedek'e geçer.
+404 (bölüm verisi yok) her iki endpoint için geçerli yanıt sayılır ve 6 saat
+önbelleğe alınır; sürekli denenmez.
 
 **Davranış**:
-- `s` / `e` tuşları intro/outro sonuna atlar; atlayınca MPV OSD'de bildirim çıkar
-- Şarkı varsa bölüm boyunca sağ üstte görünür; `Shift+M` tuşu şarkıyı tarayıcıda açar
-- İntro/outro bildirimleri ve `Shift+M` ipucu Ayarlar'dan kapatılabilir (tuşlar çalışmaya devam eder)
+- Bir bölüm başlatıldığında, MPV supervisor thread'i her 250 ms'de `time-pos` okur
+- Pencere AniSkip verisinde tanımlı OP/ED aralığına girdiğinde, MPV'ye `set_property time-pos` ile otomatik seek
+- Atlandığında MPV OSD'de 3 sn `⏩ İntro Atlandı (AniSkip: 0:28 → 1:58)` bildirimi + uygulama toast'ı
+- Ayarlardan kapatılabilir; kapatıldığında `s` / `e` tuşlarıyla manuel atlama hâlâ çalışır
+
+**Şema uyumluluğu**: API, orijinal `aniskip.com` v1 (snake_case) ve v2 (camelCase)
+yanıt yapılarını birebir döndürür. Mevcut istemciler hiçbir değişiklik olmadan
+çalışmaya devam eder.
 
 ---
 
 ## Lisans
 
-[MIT](LICENSE) © 2026 veilzon
+[MIT](LICENSE) © 2026 Lowell137
