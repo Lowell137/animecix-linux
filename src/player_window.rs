@@ -157,6 +157,13 @@ impl EmbeddedPlayer {
         if !s.alive.swap(false, Ordering::Relaxed) {
             return;
         }
+        // Önce oynatmayı durdur: mpv kare üretmeyi bıraksın, update callback
+        // artık queue_render tetiklemesin. GL ctx bundan sonra düşer.
+        s.player.set_pause(true);
+        s.player.stop();
+        // Render callback'in çizecek bir şeyi kalmasın; stack çocuğu
+        // kaldırılırken ölü FBO'ya çizim olmasın.
+        s.render_ctx = None;
         // sinema modunu geri al
         s.we_fullscreened = false;
         if s.main_window.is_fullscreen() {
@@ -182,8 +189,6 @@ impl EmbeddedPlayer {
             s.progress.borrow_mut().insert(s.prog_key.clone(), (pos, dur));
             s.client.save_progress(s.tid(), s.season, s.episode, pos, dur);
         }
-        s.player.stop();
-        s.render_ctx = None;
         // App'e ait dinleyicileri kaldır (birikmesin).
         if let Some(mc) = s.header_motion.take() {
             s.header.remove_controller(&mc);
@@ -1677,19 +1682,22 @@ pub fn build_embedded_player(
         let status_c = status.clone();
         gl_area.connect_realize(move |area| {
             area.make_current();
-            if let Some(err) = area.error() {
-                status_c.set_text(&format!("GL hatası: {err}"));
-                eprintln!("[EMBED] GLArea hatası: {err}");
+            let mut s = st_c.borrow_mut();
+            // shutdown edilmiş bir player'a ctx kurma (geri dönüşte
+            // yeni handle zaten yeni state ile gelir).
+            if !s.alive.load(Ordering::Relaxed) {
                 return;
             }
-            let mut s = st_c.borrow_mut();
             // sayfaya dönüşte ctx yeniden kurulur
             if s.render_ctx.is_none() {
                 match s.player.create_render_context() {
                     Ok(mut ctx) => {
                         let flag = flag_c.clone();
+                        let alive_cb = s.alive.clone();
                         ctx.set_update_callback(move || {
-                            flag.store(true, Ordering::Relaxed);
+                            if alive_cb.load(Ordering::Relaxed) {
+                                flag.store(true, Ordering::Relaxed);
+                            }
                         });
                         s.render_ctx = Some(ctx);
                         eprintln!("[EMBED] render ctx hazır");
@@ -1720,7 +1728,13 @@ pub fn build_embedded_player(
     }
     {
         let st_c = state.clone();
+        let alive_c = alive.clone();
         gl_area.connect_render(move |area, _ctx| {
+            // shutdown sonrası GLArea stack'ten düşerken gelen son kareler
+            // ölü ctx'e çizilmesin; yoksa sürücü çöker (NVIDIA'da sarı ekran).
+            if !alive_c.load(Ordering::Relaxed) {
+                return glib::Propagation::Stop;
+            }
             let s = st_c.borrow();
             if let Some(ctx) = s.render_ctx.as_ref() {
                 let fbo = current_fbo();
