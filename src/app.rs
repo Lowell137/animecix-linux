@@ -3887,6 +3887,7 @@ impl App {
         let last_save: Rc<RefCell<std::time::Instant>> = Rc::new(RefCell::new(std::time::Instant::now()));
         let last_save_c = last_save.clone();
         let view = views::SettingsView::build(
+            &self.window,
             &settings,
             move |new_s| {
                 *this_save.settings.borrow_mut() = new_s.clone();

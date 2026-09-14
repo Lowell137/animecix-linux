@@ -11,7 +11,6 @@ pub enum Distro {
     Arch,
     Fedora,
     Debian,
-    Ubuntu,
     OpenSUSE,
     Alpine,
     Gentoo,
@@ -169,12 +168,11 @@ pub fn build_install_command(distro: Distro) -> Option<String> {
 }
 
 /// Terminalde kurulum çalıştır (pkexec/kdesudo/gnome-terminal)
-pub fn run_install_in_terminal(distro: Distro, parent: &impl IsA<gtk::Window>) {
+pub fn run_install_in_terminal(distro: Distro, parent: &adw::ApplicationWindow) {
     let Some(cmd) = build_install_command(distro) else {
         show_error(parent, "Desteklenmeyen dağıtım", "Bu dağıtım için otomatik kurulum desteklenmiyor.");
         return;
-    }
-
+    };
     // Terminal emulator bul
     let terminals = [
         ("gnome-terminal", &["--", "bash", "-c"]),
@@ -219,7 +217,7 @@ pub fn run_install_in_terminal(distro: Distro, parent: &impl IsA<gtk::Window>) {
     }
 }
 
-fn show_info(parent: &impl IsA<gtk::Window>, heading: &str, body: &str) {
+fn show_info(parent: &adw::ApplicationWindow, heading: &str, body: &str) {
     let dialog = adw::MessageDialog::builder()
         .heading(heading)
         .body(body)
@@ -230,8 +228,7 @@ fn show_info(parent: &impl IsA<gtk::Window>, heading: &str, body: &str) {
     dialog.add_response("ok", "Tamam");
     dialog.present();
 }
-
-fn show_error(parent: &impl IsA<gtk::Window>, heading: &str, body: &str) {
+fn show_error(parent: &adw::ApplicationWindow, heading: &str, body: &str) {
     let dialog = adw::MessageDialog::builder()
         .heading(heading)
         .body(body)
@@ -244,7 +241,8 @@ fn show_error(parent: &impl IsA<gtk::Window>, heading: &str, body: &str) {
 }
 
 /// Ayarlar sayfasına eklenecek installer UI'sını oluştur
-pub fn build_installer_ui(parent_window: &impl IsA<gtk::Window>) -> gtk::Box {
+/// Ayarlar sayfasına eklenecek installer UI'sını oluştur
+pub fn build_installer_ui(parent_window: &adw::ApplicationWindow) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
     root.set_margin_top(12);
     root.set_margin_bottom(12);
@@ -318,17 +316,17 @@ pub fn build_installer_ui(parent_window: &impl IsA<gtk::Window>) -> gtk::Box {
         });
     }
     btn_box.append(&check_btn);
-
     let install_btn = gtk::Button::with_label("Eksikleri Kur");
     install_btn.add_css_class("suggested-action");
     install_btn.add_css_class("pill");
     install_btn.set_sensitive(!result.borrow().all_installed);
     {
         let result = result.clone();
-        let install_btn = install_btn.clone();
         let parent_win = parent_window.clone();
         let refresh_list = refresh_list.clone();
-        install_btn.connect_clicked(move |_| {
+        let install_btn_clicked = install_btn.clone();
+        let install_btn_timeout = install_btn.clone();
+        install_btn_clicked.connect_clicked(move |_| {
             let res = result.borrow();
             if res.all_installed {
                 return;
@@ -338,8 +336,8 @@ pub fn build_installer_ui(parent_window: &impl IsA<gtk::Window>) -> gtk::Box {
             run_install_in_terminal(distro, &parent_win);
             // Kurulum sonrası yeniden kontrol için biraz bekle
             let result2 = result.clone();
-            let install_btn2 = install_btn.clone();
             let refresh_list2 = refresh_list.clone();
+            let install_btn2 = install_btn_timeout.clone();
             glib::timeout_add_seconds_local(10, move || {
                 *result2.borrow_mut() = DepCheckResult::check();
                 let all = result2.borrow().all_installed;

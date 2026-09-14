@@ -435,7 +435,8 @@ impl MpvEmbed {
     pub fn load_url(&self, url: &str) -> Result<()> {
         eprintln!("[EMBED] loadfile: {url:.100}");
         mpv_cmd(self.ctx, &["loadfile", url, "replace"])?;
-        set_prop_flag(self.ctx, "pause", false);
+        // Duraklatılmış başla — ilk video frame hazır olana kadar ses duyulmasın
+        set_prop_flag(self.ctx, "pause", true);
         Ok(())
     }
 

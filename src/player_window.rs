@@ -1838,9 +1838,13 @@ pub fn build_embedded_player(
             let idle = s.player.idle();
             let eof = s.player.eof();
             if dur > 0.0 {
-                s.media_loaded = true;
+                if !s.media_loaded {
+                    s.media_loaded = true;
+                    // Video hazır — oynatmaya başla
+                    s.player.set_pause(false);
+                    eprintln!("[PLAYER] video hazır, oynatılıyor");
+                }
             }
-            // oynatım başladıysa durumu bir kez güncelle
             if s.media_loaded && !eof && !s.playing_shown {
                 s.playing_shown = true;
                 let host = api::Client::source_host_hint(s.sources[s.index].hint_url());

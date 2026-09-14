@@ -44,11 +44,15 @@ kontrol eder ve kendini otomatik güncelleyebilir.
 | | |
 |:---:|:---:|
 | <img src="screenshots/home.png" width="100%"> | <img src="screenshots/search.png" width="100%"> |
-| **🏠 Ana Sayfa** | **🔎 Arama** |
-| <img src="screenshots/episodes.png" width="100%"> | <img src="screenshots/favorites.png" width="100%"> |
-| **▶️ Bölüm İzleme** | **⭐ Favoriler** |
-| <img src="screenshots/marathon.png" width="100%"> | <img src="screenshots/history.png" width="100%"> |
-| **🏃 İzleme Maratonu** | **🕘 Geçmiş** |
+| **🏠 Ana Sayfa** | **🔎 Keşfet** |
+| <img src="screenshots/episodes.png" width="100%"> | <img src="screenshots/player.png" width="100%"> |
+| **▶️ Bölüm Listesi** | **🎬 Oynatıcı** |
+| <img src="screenshots/favorites.png" width="100%"> | <img src="screenshots/history.png" width="100%"> |
+| **⭐ Favoriler** | **🕘 Geçmiş** |
+| <img src="screenshots/marathon.png" width="100%"> | <img src="screenshots/calendar.png" width="100%"> |
+| **🏃 Maraton** | **📅 Takvim** |
+| <img src="screenshots/news.png" width="100%"> | <img src="screenshots/login.png" width="100%"> |
+| **📰 Haberler** | **🔐 Giriş** |
 | <img src="screenshots/settings.png" width="100%"> | <img src="screenshots/welcome.png" width="100%"> |
 | **⚙️ Ayarlar** | **👋 Karşılama** |
 

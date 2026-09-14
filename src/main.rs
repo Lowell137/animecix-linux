@@ -6,6 +6,7 @@ mod covers;
 mod download;
 mod embed_mpv;
 mod http;
+mod installer;
 mod player;
 mod player_window;
 mod play_quality;

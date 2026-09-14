@@ -589,11 +589,16 @@ pub struct SettingsView;
 
 impl SettingsView {
     pub fn build(
+        window: &adw::ApplicationWindow,
         settings: &Settings,
         on_save: impl Fn(Settings) + 'static,
         on_wipe: impl Fn(bool) + 'static,
     ) -> gtk::Box {
         let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        root.set_margin_top(12);
+        root.set_margin_bottom(12);
+        root.set_margin_start(16);
+        root.set_margin_end(16);
         root.set_margin_top(12);
         root.set_margin_bottom(12);
         root.set_margin_start(16);
@@ -931,8 +936,9 @@ API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
             });
         }
         root.append(&dl_group);
+        let install_group = crate::installer::build_installer_ui(&window);
+        root.append(&install_group);
         let update_group = adw::PreferencesGroup::new();
-
         let auto_update_row = adw::SwitchRow::new();
         auto_update_row.set_title("Otomatik Güncelleme");
         auto_update_row.set_subtitle("Başlatmada yeni sürümü kontrol eder ve AppImage'i kendisi günceller");
