@@ -1319,7 +1319,7 @@ pub fn build_embedded_player(
     vbox.append(&stage);
 
     let gl_area = gtk::GLArea::builder().hexpand(true).vexpand(true).build();
-    gl_area.set_required_version(3, 2);
+    gl_area.set_required_version(3, 0);
     gl_area.set_focusable(true);
     // Not: kalıcı tooltip yok — video üstünde beliren bilgi baloncuğu
     // oto-gizlemeyi bozuyordu. Kısayollar açılışta bir kez toast ile verilir.
@@ -1790,6 +1790,9 @@ pub fn build_embedded_player(
         let status_c = status.clone();
         gl_area.connect_realize(move |area| {
             area.make_current();
+            if let Some(err) = area.error() {
+                eprintln!("[EMBED] GLArea OpenGL hatası: {err}");
+            }
             let mut s = st_c.borrow_mut();
             // shutdown edilmiş bir player'a ctx kurma (geri dönüşte
             // yeni handle zaten yeni state ile gelir).

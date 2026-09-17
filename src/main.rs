@@ -126,11 +126,6 @@ fn main() {
     }
 
     std::env::set_var("MALLOC_ARENA_MAX", "2");
-    let light_mode = api::Client::new().load_settings().light_mode;
-    if light_mode {
-        std::env::set_var("GSK_RENDERER", "cairo");
-        eprintln!("[STARTUP] hafif mod aktif (cairo renderer)");
-    }
 
     let app = adw::Application::builder()
         .application_id("tr.com.animecix")

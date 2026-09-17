@@ -379,6 +379,7 @@ impl MpvEmbed {
 
         // --- mevcut harici mpv argümanlarıyla aynı ruh (option olarak) ---
         set_opt(ctx, "hwdec", "auto-safe");
+        set_opt(ctx, "hwdec-fallback", "yes");
         set_opt(ctx, "hr-seek", "yes");
         set_opt(ctx, "keep-open", "yes");
         set_opt(ctx, "cache", "yes");
@@ -394,7 +395,7 @@ impl MpvEmbed {
         );
         set_opt(ctx, "osc", "no");
         // gömülüde terminal mesajı kirletmesin
-        set_opt(ctx, "msg-level", "all=no");
+        set_opt(ctx, "msg-level", "all=warn");
 
         for (k, v) in extra_opts {
             set_opt(ctx, k, v);
