@@ -1849,7 +1849,10 @@ pub fn build_embedded_player(
             let s = st_c.borrow();
             if let Some(ctx) = s.render_ctx.as_ref() {
                 let fbo = current_fbo();
-                if let Err(e) = ctx.render(fbo, area.width(), area.height(), true) {
+                let scale = area.scale_factor();
+                let w = area.width() * scale;
+                let h = area.height() * scale;
+                if let Err(e) = ctx.render(fbo, w, h, true) {
                     eprintln!("[EMBED] render hatası: {e}");
                 }
                 ctx.report_swap();
