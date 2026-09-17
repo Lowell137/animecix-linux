@@ -42,6 +42,15 @@ Tüm sistem bağımlılıklarını (Fedora için `fuse-libs`, Ubuntu/Debian içi
 curl -fsSL https://raw.githubusercontent.com/Lowell137/animecix-linux/main/scripts/install.sh | bash
 ```
 
+### Flatpak ile Kurulum (Tek Tıkla / Sandbox)
+Tüm bağımlılıklar (GTK4, libadwaita, mpv) paket içinde gömülü gelir; sistem paketleriyle çakışmaz ve FUSE gerektirmez:
+1. [Son Sürüm (Releases)](https://github.com/Lowell137/animecix-linux/releases/latest) sayfasından `AnimeciX.flatpak` dosyasını indirin.
+2. Dosyaya çift tıklayarak GNOME Yazılımlar mağazasından tek tıkla kurun veya terminalden:
+```bash
+flatpak install --user AnimeciX.flatpak
+flatpak run io.github.Lowell137.AnimeciX
+```
+
 ### Manuel İndirme (AppImage)
 
 ```bash
