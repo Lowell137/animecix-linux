@@ -35,19 +35,23 @@ Tek dosyalık taşınabilir AppImage olarak dağıtılır. Açılışta yeni sü
 
 ## Kurulum
 
+### Tek Komutla Otomatik Kurulum (Önerilen)
+Tüm sistem bağımlılıklarını (Fedora için `fuse-libs`, Ubuntu/Debian için `libfuse2`, Arch için `fuse2`, `mpv` vb.) otomatik kurar, en son sürümü indirir, masaüstü kısayolunu ekler ve uygulamayı başlatır:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lowell137/animecix-linux/main/scripts/install.sh | bash
+```
+
+### Manuel İndirme (AppImage)
+
 ```bash
 curl -L https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage -o AnimeciX.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
 ```
 
-wget ile:
-
+*Not: Fedora 40+ veya Ubuntu 24.04+ üzerinde FUSE hatası alırsanız yukarıdaki otomatik kurulum betiğini çalıştırabilir veya `--appimage-extract-and-run` parametresiyle açabilirsiniz:*
 ```bash
-wget -O AnimeciX.AppImage https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
+./AnimeciX.AppImage --appimage-extract-and-run
 ```
-
-Kurulum gerekmez, tek dosyadır. Masaüstü kısayolu için uygulama içinden Ayarlar bölümündeki başlatıcı kurma seçeneğini kullan.
-
-Video oynatmazsa önce Ayarlar içindeki Sistem Bağımlılıkları sayfasını aç. Dağıtımına göre eksik paketleri (mpv, gtk4, adwaita, gstreamer, ffmpeg) gösterir, tek düğmeyle terminal üzerinden kurdurur.
 
 ## Kaynaktan derleme
 

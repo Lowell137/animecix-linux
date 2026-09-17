@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.Lowell137.AnimeciX</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <developer id="io.github.Lowell137">
+    <name>Lowell137</name>
+  </developer>
+  <name>AnimeciX</name>
+  <summary>Türkçe anime izleme uygulaması</summary>
+  <summary xml:lang="en">Turkish anime streaming client powered by mpv</summary>
+  <description>
+    <p>
+      AnimeciX; Türkçe altyazılı anime dizilerini izlemek için tasarlanmış hafif ve hızlı bir masaüstü istemcisidir.
+      GTK4/libadwaita ile yazılan arayüz, video oynatmayı mpv'ye devreder.
+    </p>
+    <p>Öne çıkanlar:</p>
+    <ul>
+      <li>Türkçe arayüz ve Türkçe altyazılı içerik desteği</li>
+      <li>Bölüm ve film indirme: çok bağlantılı hızlı indirme, kaldığı yerden devam, toplu indirme</li>
+      <li>Sayfalar menüsü (Ctrl+T): Ana Sayfa, Favoriler, Maraton, Geçmiş, İndirilenler, Ayarlar tek menüde</li>
+      <li>5 koyu tema: Koyu, Bordo, Orman, Lacivert, Mor</li>
+      <li>Focus Mod ve otomatik intro/outro atlama desteği</li>
+      <li>Kaldığın yerden devam etme ve sürükle-bırak sıralamalı izleme maratonu</li>
+      <li>Anime4K görsel iyileştirme modları</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.Lowell137.AnimeciX.desktop</launchable>
+  <screenshots>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/home.png</image>
+      <caption>Ana ekran</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/player.png</image>
+      <caption>Oynatıcı</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/episodes.png</image>
+      <caption>Bölüm listesi</caption>
+    </screenshot>
+  </screenshots>
+  <provides>
+    <binary>animecix</binary>
+  </provides>
+  <releases>
+    <release version="1.3.1" date="2026-09-17">
+      <description>
+        <p>Focus Mod (AniSkip entegrasyonu ve otomatik bölüm geçişi), sadeleştirilmiş oynatıcı alt barı, kalıcı görünür ses kontrolü, birleşik ayarlar menüsü.</p>
+      </description>
+    </release>
+  </releases>
+  <content_rating type="oars-1.1">
+    <content_attribute id="social-chat">mild</content_attribute>
+  </content_rating>
+  <update_contact>lowell137@users.noreply.github.com</update_contact>
+  <url type="homepage">https://github.com/Lowell137/animecix-linux</url>
+  <url type="bugtracker">https://github.com/Lowell137/animecix-linux/issues</url>
+</component>

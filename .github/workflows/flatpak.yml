@@ -1,0 +1,37 @@
+name: Build Flatpak Bundle
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  flatpak:
+    name: "Flatpak Package"
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-47
+      options: --privileged
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Flatpak Bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: AnimeciX.flatpak
+          manifest-path: packaging/flatpak/io.github.Lowell137.AnimeciX.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+      - name: Upload Flatpak Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnimeciX-Flatpak-Bundle
+          path: AnimeciX.flatpak
+
+      - name: Upload to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: AnimeciX.flatpak

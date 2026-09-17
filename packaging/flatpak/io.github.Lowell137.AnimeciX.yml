@@ -1,6 +1,6 @@
-app-id: io.github.veilzon.AnimeciX
+app-id: io.github.Lowell137.AnimeciX
 runtime: org.gnome.Platform
-runtime-version: '50'
+runtime-version: '47'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
@@ -45,7 +45,7 @@ modules:
     buildsystem: meson
     config-opts:
       - -Dcplayer=true
-      - -Dlibmpv=false
+      - -Dlibmpv=true
       - -Dlua=disabled
       - -Djavascript=disabled
       - -Dlibarchive=disabled
@@ -69,8 +69,7 @@ modules:
     sources:
       - type: git
         url: https://github.com/mpv-player/mpv.git
-        tag: v0.36.0
-        commit: f4210f84906c3b00a65fba198c8127b6757b9350
+        tag: v0.38.0
 
   - name: aria2
     buildsystem: autotools
@@ -91,12 +90,12 @@ modules:
     build-commands:
       - cargo build --release --offline --locked
       - install -Dm755 target/release/animecix -t /app/bin
-      - install -Dm644 packaging/flatpak/io.github.veilzon.AnimeciX.desktop -t /app/share/applications/
-      - install -Dm644 packaging/flatpak/io.github.veilzon.AnimeciX.metainfo.xml -t /app/share/metainfo/
-      - install -Dm644 assets/icon-64.png /app/share/icons/hicolor/64x64/apps/io.github.veilzon.AnimeciX.png
-      - install -Dm644 assets/icon-128.png /app/share/icons/hicolor/128x128/apps/io.github.veilzon.AnimeciX.png
-      - install -Dm644 assets/icon-256.png /app/share/icons/hicolor/256x256/apps/io.github.veilzon.AnimeciX.png
-      - install -Dm644 assets/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.veilzon.AnimeciX.png
+      - install -Dm644 packaging/flatpak/io.github.Lowell137.AnimeciX.desktop -t /app/share/applications/
+      - install -Dm644 packaging/flatpak/io.github.Lowell137.AnimeciX.metainfo.xml -t /app/share/metainfo/
+      - install -Dm644 assets/icon-64.png /app/share/icons/hicolor/64x64/apps/io.github.Lowell137.AnimeciX.png
+      - install -Dm644 assets/icon-128.png /app/share/icons/hicolor/128x128/apps/io.github.Lowell137.AnimeciX.png
+      - install -Dm644 assets/icon-256.png /app/share/icons/hicolor/256x256/apps/io.github.Lowell137.AnimeciX.png
+      - install -Dm644 assets/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.Lowell137.AnimeciX.png
       - mkdir -p /app/share/animecix/assets
       - cp -r assets/upscale /app/share/animecix/assets/
       - chmod -R a-w /app/share/animecix/assets/upscale
