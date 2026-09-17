@@ -9,11 +9,9 @@ mod http;
 mod installer;
 mod player;
 mod player_window;
-mod play_quality;
 mod segmented;
 mod ui;
 mod update;
-mod vpn;
 mod xeh;
 
 use app::App;
@@ -225,6 +223,27 @@ fn main() {
                     font-weight: 700;
                 }
 
+                /* === Ses Popover Kaydırıcı Topu (Her Zaman Görünür) === */
+                scale.vol-scale, .vol-scale, .vol-pop scale {
+                    padding: 4px 0;
+                }
+                scale.vol-scale slider,
+                scale.vol-scale > trough > slider,
+                .vol-scale slider,
+                .vol-scale > trough > slider,
+                .vol-pop scale slider,
+                .vol-pop scale > trough > slider {
+                    opacity: 1;
+                    min-width: 16px;
+                    min-height: 16px;
+                    border-radius: 9999px;
+                    background-color: #ffffff;
+                    background: #ffffff;
+                    border: 1px solid rgba(0, 0, 0, 0.3);
+                    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+                    margin: -5px 0;
+                }
+
                 /* === Kart Hover: sadece poster kalkar, yazılar sabit kalır === */
                 /* (hover kartta yakalanıp overlay'e class olarak basılır) */
                 .poster-lift {
@@ -321,7 +340,7 @@ fn main() {
 
                 /* === Dock alt yazıları === */
                 .side-caption {
-                    font-size: 0.68em;
+                    font-size: 0.65em;
                     color: alpha(currentColor, 0.65);
                 }
 

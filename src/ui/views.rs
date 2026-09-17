@@ -680,6 +680,18 @@ impl SettingsView {
         aniskip_row.set_subtitle("AniSkip API üzerinden 's' kısayol tuşu ile intro bitişine otomatik atlar");
         aniskip_row.set_active(settings.aniskip_enabled);
         player_group.add(&aniskip_row);
+
+        let focus_row = adw::SwitchRow::new();
+        focus_row.set_title("Focus Mod");
+        focus_row.set_subtitle("İntro ve outro'ları otomatik atlar, bölüm bitince sonrakine geçer");
+        focus_row.set_active(settings.focus_mode);
+        player_group.add(&focus_row);
+
+        let auto_next_row = adw::SwitchRow::new();
+        auto_next_row.set_title("Otomatik Bölüm Atlama");
+        auto_next_row.set_subtitle("Bölüm bitince bir sonraki bölüme otomatik geçer");
+        auto_next_row.set_active(settings.auto_next_episode);
+        player_group.add(&auto_next_row);
         root.append(&player_group);
 
         let perf_group = adw::PreferencesGroup::new();
@@ -702,137 +714,6 @@ impl SettingsView {
         perf_group.add(&patience_row);
         root.append(&perf_group);
 
-        if !crate::vpn::in_flatpak() {
-        let vpn_group = adw::PreferencesGroup::new();
-        vpn_group.set_title("VPN Proxy (İsteğe Bağlı)");
-
-        let info_btn = gtk::Button::from_icon_name("dialog-information");
-        info_btn.add_css_class("flat");
-        info_btn.add_css_class("circular");
-        info_btn.set_tooltip_text(Some("VPN Proxy ne işe yarar? Tıkla, detaylı açıkla."));
-        info_btn.set_valign(gtk::Align::Center);
-        {
-            let info_btn = info_btn.clone();
-            info_btn.connect_clicked(move |btn| {
-                let parent = btn.root().and_downcast::<gtk::Window>();
-                show_info_dialog(
-                    parent.as_ref(),
-                    "VPN Proxy nedir?",
-                    "ISS'n (internet sağlayıcı) video trafiğini yavaşlatıp kısıtlıyorsa buradan \
-yerel bir proxy (sing-box + ProtonVPN WireGuard) çalıştırabilirsin.\n\n\
-• Proxy ayakta olduğunda video trafiği otomatik olarak \
-127.0.0.1:10808 üzerinden çıkar; root (yönetici) izni gerekmez.\n\
-• Başlattıktan sonra çıkan pencerede 'Yeniden Başlat' dersen ana sayfa/arama gibi \
-API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
-• Proxy kapalıyken hiçbir şey değişmez, uygulama normal bağlantını kullanır.\n\
-• İlk kurulum için 'Başlat'a bas, adım adım rehber çıkar.\n\
-• Proxy kapatılırsa uygulama otomatik normal bağlantıya döner, hiçbir ayarın bozulmaz.",
-                );
-            });
-        }
-        vpn_group.set_header_suffix(Some(&info_btn));
-
-        let vpn_status_row = adw::ActionRow::new();
-        vpn_status_row.set_title("Durum");
-        vpn_status_row.set_subtitle("Yerel proxy (127.0.0.1:10808) üzerinden ISS kısıtlamalarını aşar");
-        let refresh_vpn_status = {
-            let row = vpn_status_row.clone();
-            move || {
-                if crate::vpn::port_alive() {
-                    row.set_subtitle("Çalışıyor — video trafiği 127.0.0.1:10808 üzerinden çıkıyor");
-                    row.remove_css_class("dim-label");
-                } else {
-                    row.set_subtitle("Kapalı — uygulama normal bağlantıyı kullanır");
-                    row.add_css_class("dim-label");
-                }
-            }
-        };
-        refresh_vpn_status();
-        vpn_group.add(&vpn_status_row);
-        root.append(&vpn_group);
-
-        let btn_box = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        let start_btn = gtk::Button::with_label("Başlat");
-        start_btn.add_css_class("suggested-action");
-        start_btn.add_css_class("pill");
-        let stop_btn = gtk::Button::with_label("Durdur");
-        stop_btn.add_css_class("pill");
-        btn_box.append(&start_btn);
-        btn_box.append(&stop_btn);
-        let vpn_btn_row = adw::ActionRow::new();
-        vpn_btn_row.set_title("sing-box (WireGuard → SOCKS köprüsü)");
-        vpn_btn_row.set_subtitle("ProtonVPN ücretsiz hesapla çalışır; kurulum için Başlat'a bas");
-        vpn_btn_row.add_suffix(&btn_box);
-        vpn_group.add(&vpn_btn_row);
-
-        let refresh_status_rc = std::rc::Rc::new(refresh_vpn_status);
-
-        let live_rs = refresh_status_rc.clone();
-        glib::timeout_add_seconds_local(2, move || {
-            live_rs();
-            glib::ControlFlow::Continue
-        });
-
-        let rs = refresh_status_rc.clone();
-        start_btn.connect_clicked(move |btn| {
-            let parent = btn.root().and_downcast::<gtk::Window>();
-            let rs = rs.clone();
-            glib::spawn_future_local(async move {
-                match crate::vpn::detect() {
-                    None => {
-                        show_info_dialog(parent.as_ref(), "VPN Proxy Kurulumu", &crate::vpn::setup_instructions());
-                        rs();
-                    }
-                    Some((bin, cfg)) => {
-                        let res = {
-                            let bin = bin.clone();
-                            let cfg = cfg.clone();
-                            gio::spawn_blocking(move || crate::vpn::start(&bin, &cfg)).await
-                        };
-                        match res {
-                            Ok(Ok(())) => {
-                                let dlg = adw::MessageDialog::builder()
-                                    .heading("VPN Proxy başlatıldı")
-                                    .body("Video trafiği artık tünel üzerinden çıkıyor.\nAPI isteklerinin (ana sayfa, arama) de tüneleden geçmesi için uygulamayı yeniden başlat.")
-                                    .close_response("later")
-                                    .build();
-                                dlg.add_response("later", "Sonra");
-                                dlg.add_response("restart", "Yeniden Başlat 🔄");
-                                dlg.set_response_appearance("restart", adw::ResponseAppearance::Suggested);
-                                if let Some(w) = parent.as_ref() {
-                                    dlg.set_transient_for(Some(w));
-                                }
-                                dlg.connect_response(None, move |_, resp| {
-                                    if resp == "restart" {
-                                        crate::restart_app();
-                                    }
-                                });
-                                dlg.present();
-                            }
-                            Ok(Err(e)) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", &format!("{e}\n\nLog dosyası: {}", crate::vpn::log_path().display())),
-                            Err(_) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", "Proxy başlatılırken beklenmeyen bir hata oluştu (süreç çökmüş olabilir)."),
-                        }
-                        rs();
-                    }
-                }
-            });
-        });
-
-        let rs2 = refresh_status_rc.clone();
-        stop_btn.connect_clicked(move |btn| {
-            let parent = btn.root().and_downcast::<gtk::Window>();
-            let rs2 = rs2.clone();
-            glib::spawn_future_local(async move {
-                let killed = gio::spawn_blocking(|| crate::vpn::stop()).await;
-                match killed {
-                    Ok(true) => {}
-                    Ok(false) => show_info_dialog(parent.as_ref(), "VPN Proxy", "Çalışan sing-box süreci bulunamadı."),
-                    Err(_) => show_info_dialog(parent.as_ref(), "VPN Proxy Hatası", "Proxy durdurulurken beklenmeyen bir hata oluştu."),
-                }
-                rs2();
-            });
-        });
-        }
 
         let img_group = adw::PreferencesGroup::new();
         img_group.set_title("Görüntü İyileştirme");
@@ -990,6 +871,8 @@ API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
             let fs_r = fs_row.clone();
             let emb_r = embed_row.clone();
             let ani_r = aniskip_row.clone();
+            let foc_r = focus_row.clone();
+            let anx_r = auto_next_row.clone();
             let au_r = auto_update_row.clone();
             let notify_r = notify_row.clone();
             let up_r = upscale_row.clone();
@@ -1022,6 +905,8 @@ API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
                 updated.auto_fullscreen = fs_r.is_active();
                 updated.embedded_player = emb_r.is_active();
                 updated.aniskip_enabled = ani_r.is_active();
+                updated.focus_mode = foc_r.is_active();
+                updated.auto_next_episode = anx_r.is_active();
                 updated.auto_update = au_r.is_active();
                 updated.notify_uptodate = notify_r.is_active();
                 updated.upscale = match up_r.selected() {
@@ -1058,6 +943,10 @@ API istekleri de tünel üzerinden gider (ISS engellerini tamamen aşar).\n\
         embed_row.connect_active_notify(move |_| sa_emb());
         let sa5 = save_all.clone();
         aniskip_row.connect_active_notify(move |_| sa5());
+        let sa_foc = save_all.clone();
+        focus_row.connect_active_notify(move |_| sa_foc());
+        let sa_anx = save_all.clone();
+        auto_next_row.connect_active_notify(move |_| sa_anx());
         let sa6 = save_all.clone();
         auto_update_row.connect_active_notify(move |_| sa6());
         let sa7 = save_all.clone();

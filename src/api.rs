@@ -585,6 +585,10 @@ pub struct Settings {
     pub ui_scale: f32,
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    #[serde(default = "default_false")]
+    pub focus_mode: bool,
+    #[serde(default = "default_true")]
+    pub auto_next_episode: bool,
 }
 fn default_loading() -> String { "overlay".into() }
 fn default_quick_search() -> bool { true }
@@ -687,6 +691,8 @@ impl Default for Settings {
             local_history_enabled: default_true(),
             ui_scale: default_ui_scale(),
             sidebar_collapsed: false,
+            focus_mode: false,
+            auto_next_episode: true,
         }
     }
 }
@@ -815,12 +821,7 @@ pub fn check_internet() -> InternetStatus {
 
 impl Client {
     pub fn new() -> Self {
-        let proxy = if crate::vpn::port_alive() {
-            Some(format!("socks5h://127.0.0.1:{}", crate::vpn::PROXY_PORT))
-        } else {
-            None
-        };
-        let http = crate::http::Http::new(proxy.as_deref())
+        let http = crate::http::Http::new(None)
             .unwrap_or_else(|e| panic!("HTTP istemcisi baslatilamadi: {e}"));
 
         let cache_dir = {
@@ -1962,18 +1963,19 @@ impl Client {
 
         let key = format!("aniskip_v4:{mal_id}:{ep_num}");
         let d = match self.cache_get(&key, 6 * 3600, |http| {
-            let endpoints: [(&str, &str); 2] = [
-                ("https://aniskip-mirror-cf.yasar-123-sevda.workers.dev", "cf"),
+            let endpoints: [(&str, &str); 3] = [
+                ("https://api.aniskip.com", "official"),
                 ("https://aniskip-mirror.vercel.app", "vercel"),
+                ("https://aniskip-mirror-cf.yasar-123-sevda.workers.dev", "cf"),
             ];
             let fetch_one = |http: &crate::http::Http, base: &str| -> Result<serde_json::Value, String> {
-                let url = format!("{base}/v2/skip-times/{mal_id}/{ep_num}?types=op,ed&episodeLength=0");
+                let url = format!("{base}/v2/skip-times/{mal_id}/{ep_num}?types=op&types=ed&episodeLength=0");
                 let resp = http.get(url)
                     .timeout(8)
                     .send()
                     .map_err(|e| e.to_string())?;
                 if resp.status() == 404 {
-                    return Ok(serde_json::json!({"found": false, "results": []}));
+                    return Err("404 bulunamadı".to_string());
                 }
                 resp.error_for_status()
                     .map_err(|e| e.to_string())?

@@ -20,6 +20,11 @@ MINOR=$(echo "$OLD_VER" | cut -d. -f2)
 PATCH=$(echo "$OLD_VER" | cut -d. -f3)
 
 case "${VERSION_BUMP:-patch}" in
+  none)
+    NEW_MAJOR=$MAJOR
+    NEW_MINOR=$MINOR
+    NEW_PATCH=$PATCH
+    ;;
   major)
     NEW_MAJOR=$((MAJOR + 1))
     NEW_MINOR=0

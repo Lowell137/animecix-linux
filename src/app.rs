@@ -961,7 +961,7 @@ impl App {
     /// altında kısa alt yazı. Üst bar hep yatay: arama solda, menü sağda.
     fn apply_sidebar(&self) {
         let collapsed = self.settings.borrow().sidebar_collapsed;
-        self.sidebar.set_size_request(if collapsed { 60 } else { 164 }, -1);
+        self.sidebar.set_size_request(if collapsed { 65 } else { 164 }, -1);
         self.sidebar.set_margin_start(if collapsed { 4 } else { 8 });
         self.sidebar.set_margin_end(if collapsed { 4 } else { 4 });
         // Üst bar daima yatay (dock'ta mini butonlar).
@@ -976,7 +976,7 @@ impl App {
                 btn.remove_css_class("dock-mini");
             }
             if let Some(img) = btn.child().and_downcast::<gtk::Image>() {
-                img.set_pixel_size(if collapsed { 14 } else { -1 });
+                img.set_pixel_size(if collapsed { 16 } else { -1 });
             }
         }
         let uname = self
@@ -987,7 +987,7 @@ impl App {
         for it in self.side_items.borrow().iter() {
             let inner = it.btn.child().and_downcast::<gtk::Box>();
             if collapsed {
-                it.icon.set_pixel_size(17);
+                it.icon.set_pixel_size(14);
                 it.icon.set_halign(gtk::Align::Center);
                 it.label.set_visible(true);
                 if !it.label.has_css_class("side-caption") {
@@ -1008,10 +1008,10 @@ impl App {
                 if let Some(inner) = inner {
                     inner.set_orientation(gtk::Orientation::Vertical);
                     // Yazı ikondan biraz aşağıda dursun.
-                    inner.set_spacing(6);
+                    inner.set_spacing(2);
                     inner.set_halign(gtk::Align::Center);
-                    inner.set_margin_start(2);
-                    inner.set_margin_end(2);
+                    inner.set_margin_start(1);
+                    inner.set_margin_end(1);
                 }
             } else {
                 it.icon.set_pixel_size(-1);
