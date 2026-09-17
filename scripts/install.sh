@@ -43,8 +43,8 @@ install_deps() {
 
     case "$DISTRO" in
         fedora|rhel|centos|rocky|alma)
-            echo "==> Fedora/RHEL bağımlılıkları kuruluyor (fuse-libs, mpv, gtk4, libadwaita, curl, jq)..."
-            $cmd_prefix dnf install -y fuse-libs mpv gtk4 libadwaita curl jq
+            echo "==> Fedora/RHEL bağımlılıkları kuruluyor (fuse-libs, mpv-libs, mpv, gtk4, libadwaita, curl, jq)..."
+            $cmd_prefix dnf install -y fuse-libs mpv-libs mpv gtk4 libadwaita curl jq
             ;;
         arch|manjaro|endeavouros|cachyos|artix)
             echo "==> Arch bağımlılıkları kuruluyor (fuse2, mpv, gtk4, libadwaita, curl, jq)..."
@@ -60,8 +60,9 @@ install_deps() {
                 fuse_pkg="libfuse2t64"
             fi
             
-            echo "==> Bağımlılıklar kuruluyor ($fuse_pkg, mpv, libgtk-4-1, libadwaita-1-0, curl, jq)..."
-            $cmd_prefix apt-get install -y "$fuse_pkg" mpv libgtk-4-1 libadwaita-1-0 curl jq
+            echo "==> Bağımlılıklar kuruluyor ($fuse_pkg, libmpv2/libmpv1, mpv, libgtk-4-1, libadwaita-1-0, curl, jq)..."
+            $cmd_prefix apt-get install -y "$fuse_pkg" libmpv2 mpv libgtk-4-1 libadwaita-1-0 curl jq || \
+            $cmd_prefix apt-get install -y "$fuse_pkg" libmpv1 mpv libgtk-4-1 libadwaita-1-0 curl jq
             ;;
         opensuse*|suse)
             echo "==> openSUSE bağımlılıkları kuruluyor (libfuse2, mpv, gtk4, libadwaita-1-0, curl, jq)..."
@@ -74,7 +75,7 @@ install_deps() {
                 $cmd_prefix apt-get update -y
                 $cmd_prefix apt-get install -y libfuse2 mpv curl jq || $cmd_prefix apt-get install -y libfuse2t64 mpv curl jq
             elif [[ "$ID_LIKE" == *"fedora"* ]] || [[ "$ID_LIKE" == *"rhel"* ]]; then
-                $cmd_prefix dnf install -y fuse-libs mpv gtk4 libadwaita curl jq
+                $cmd_prefix dnf install -y fuse-libs mpv-libs mpv gtk4 libadwaita curl jq
             else
                 echo "Uyarı: Bilinmeyen dağıtım ($DISTRO). Lütfen FUSE 2 (fuse-libs/libfuse2/fuse2) ve mpv paketlerini kendiniz kurun."
             fi
@@ -84,7 +85,9 @@ install_deps() {
 
 # Bağımlılıkları kontrol et ve gerekirse kur
 NEEDS_INSTALL=0
-if ! command -v mpv >/dev/null 2>&1; then
+
+# libmpv paylaşılan kütüphane kontrolü (libmpv.so.2 / libmpv.so)
+if ! ldconfig -p 2>/dev/null | grep -q "libmpv\.so"; then
     NEEDS_INSTALL=1
 fi
 
@@ -97,7 +100,7 @@ if [ "$NEEDS_INSTALL" -eq 1 ]; then
     echo "==> Eksik sistem bağımlılıkları tespit edildi, yükleniyor..."
     install_deps
 else
-    echo "==> Tüm temel bağımlılıklar (FUSE2, mpv) zaten kurulu."
+    echo "==> Tüm temel bağımlılıklar (FUSE2, libmpv) zaten kurulu."
 fi
 
 # 3. Dizinleri oluştur
