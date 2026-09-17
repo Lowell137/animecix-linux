@@ -378,8 +378,8 @@ impl MpvEmbed {
         set_opt(ctx, "vo", "libmpv");
 
         // --- mevcut harici mpv argümanlarıyla aynı ruh (option olarak) ---
-        set_opt(ctx, "hwdec", "auto-safe");
-        set_opt(ctx, "hwdec-fallback", "yes");
+        set_opt(ctx, "hwdec", "no");
+        set_opt(ctx, "hwdec-fallback", "no");
         set_opt(ctx, "hr-seek", "yes");
         set_opt(ctx, "keep-open", "yes");
         set_opt(ctx, "cache", "yes");
