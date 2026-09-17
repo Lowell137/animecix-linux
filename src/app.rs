@@ -497,7 +497,7 @@ impl App {
             .build();
         window.set_size_request(1479, 845);
 
-        let initial_page = if welcome_seen { Page::Home } else { Page::Welcome };
+        let initial_page = Page::Home;
 
         let covers = CoverManager::new(client.clone());
 
@@ -633,9 +633,7 @@ impl App {
             });
         }
         app_inst.show_page(&initial_page);
-        if welcome_seen {
-            app_inst.fetch_home();
-        }
+        app_inst.fetch_home();
         app_inst.apply_goto_arg();
         app_inst
     }
