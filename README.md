@@ -2,76 +2,97 @@
 
 [![Sürümler](https://img.shields.io/github/v/release/Lowell137/animecix-linux?style=flat-square)](https://github.com/Lowell137/animecix-linux/releases/latest)
 [![Lisans: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
-                                                                              Bu Fork AI ile yapılmıştır
 <img src="assets/hicolor/256x256/apps/tr.com.animecix.png" align="right" width="96" height="96" alt="AnimeciX">
 
-GTK4 ile yazılmış anime, dizi ve film istemcisi. Bu depo, orijinal projeden ayrılmış bir çataldır ve doğrudan buradan geliştirilir.
+Linux için modern, hafif ve hızlı Türkçe anime izleme istemcisi. GTK4 ve Libadwaita ile yerel masaüstü deneyimi sunar, video oynatımını gömülü `libmpv` motoru ile donanım hızlandırmalı olarak gerçekleştirir.
 
-Bu çatala eklenenler:
-- Ayarlar içinde sistem bağımlılık kontrolü: dağıtımı algılar, eksikleri tek komutla kurdurur
-- Kart düzeni, hover davranışı ve oynatıcı başlatma düzeltmeleri
+---
 
+### Öne Çıkan Özellikler
 
+- **Modern GTK4 / Libadwaita Arayüzü**: Sistem temasıyla tam uyumlu, akıcı ve şık arayüz.
+- **Gömülü libmpv Oynatıcı**: Donanım hızlandırmalı, düşük kaynak tüketimli video motoru.
+- **Focus Mod (Otomatik Atlama)**: AniSkip API entegrasyonu sayesinde açılış (OP) ve kapanış (ED) kısımlarını otomatik atlar; bölüm bitince sıradaki bölüme kesintisiz geçer.
+- **Sade ve Sezgisel Kontroller**: Tıklayınca açılan ses kontrolü, tek dişli simgesi altında toplanan birleşik ayarlar (kaynak, kalite, hız, ses ve altyazı seçimi).
+- **Takip & Düzenleme**: Favoriler, izleme geçmişi, maraton modu ve yayın takvimi.
+- **İndirme Yöneticisi**: Çoklu bağlantı desteğiyle hızlı bölüm/film indirme ve indirme takibi.
+- **Esnek Kurulum**: İster tek tıkla Flatpak, ister taşınabilir AppImage veya otomatik kurulum betiği.
 
-Tek dosyalık taşınabilir AppImage olarak dağıtılır. Açılışta yeni sürümü kontrol edip kendini güncelleyebilir. AppImage x86-64-v2 için derlenir, AVX512 gerektirmez.
+---
 
-> Resmî olmayan bir istemcidir, herkese açık API kullanır. Kendi sorumluluğunda kullan.
-
-## Ekran görüntüleri
+## Ekran Görüntüleri
 
 <div align="center">
+
 | | |
 |:---:|:---:|
 | <img src="screenshots/home.png" width="100%"> | <img src="screenshots/search.png" width="100%"> |
-| Ana Sayfa | Keşfet |
+| **Ana Sayfa** | **Keşfet & Arama** |
 | <img src="screenshots/player.png" width="100%"> | <img src="screenshots/favorites.png" width="100%"> |
-| Oynatıcı | Favoriler |
+| **Oynatıcı** | **Favoriler** |
 | <img src="screenshots/history.png" width="100%"> | <img src="screenshots/marathon.png" width="100%"> |
-| Geçmiş | Maraton |
+| **İzleme Geçmişi** | **Maraton Modu** |
 | <img src="screenshots/calendar.png" width="100%"> | <img src="screenshots/news.png" width="100%"> |
-| Takvim | Haberler |
-| <img src="screenshots/login.png" width="100%"> | |
-| Giriş | |
+| **Yayın Takvimi** | **Haberler** |
+
+</div>
+
+---
 
 ## Kurulum
 
-### Tek Komutla Otomatik Kurulum (Önerilen)
-Tüm sistem bağımlılıklarını (Fedora için `fuse-libs`, Ubuntu/Debian için `libfuse2`, Arch için `fuse2`, `mpv` vb.) otomatik kurar, en son sürümü indirir, masaüstü kısayolunu ekler ve uygulamayı başlatır:
+### 1. Flatpak ile Kurulum (Önerilen - Tek Tıkla)
+Bağımlılık ve sistem kütüphaneleriyle uğraşmadan tek tıkla kurmak için:
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/Lowell137/animecix-linux/main/scripts/install.sh | bash
-```
-
-### Flatpak ile Kurulum (Tek Tıkla / Sandbox)
-Tüm bağımlılıklar (GTK4, libadwaita, mpv) paket içinde gömülü gelir; sistem paketleriyle çakışmaz ve FUSE gerektirmez:
-1. [Son Sürüm (Releases)](https://github.com/Lowell137/animecix-linux/releases/latest) sayfasından `AnimeciX.flatpak` dosyasını indirin.
-2. Dosyaya çift tıklayarak GNOME Yazılımlar mağazasından tek tıkla kurun veya terminalden:
+1. [Sürümler](https://github.com/Lowell137/animecix-linux/releases/latest) sayfasından **`AnimeciX.flatpak`** dosyasını indirin.
+2. Dosyaya çift tıklayarak GNOME Yazılımlar mağazasından kurun veya terminalden çalıştırın:
 ```bash
 flatpak install --user AnimeciX.flatpak
 flatpak run io.github.Lowell137.AnimeciX
 ```
 
-### Manuel İndirme (AppImage)
+### 2. Tek Komutla Otomatik Kurulum
+Fedora, Ubuntu, Debian, Arch ve openSUSE üzerinde eksik bağımlılıkları (`mpv-libs`, `fuse` vb.) otomatik kurup uygulamayı başlatır:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lowell137/animecix-linux/main/scripts/install.sh | bash
+```
+
+### 3. Taşınabilir AppImage
 
 ```bash
 curl -L https://github.com/Lowell137/animecix-linux/releases/latest/download/AnimeciX-x86_64.AppImage -o AnimeciX.AppImage && chmod +x AnimeciX.AppImage && ./AnimeciX.AppImage
 ```
 
-*Not: Fedora 40+ veya Ubuntu 24.04+ üzerinde FUSE hatası alırsanız yukarıdaki otomatik kurulum betiğini çalıştırabilir veya `--appimage-extract-and-run` parametresiyle açabilirsiniz:*
-```bash
-./AnimeciX.AppImage --appimage-extract-and-run
-```
+*(Fedora veya modern Ubuntu'da FUSE uyarısı alırsanız `./AnimeciX.AppImage --appimage-extract-and-run` parametresiyle açabilirsiniz).*
 
-## Kaynaktan derleme
+---
 
-Gerekli paketler:
+## Kısayollar
 
-- Debian/Ubuntu: `sudo apt install libgtk-4-dev libadwaita-1-dev mpv pkg-config`
-- Fedora: `sudo dnf install gtk4-devel libadwaita-devel mpv pkgconf-pkg-config`
-- Arch: `sudo pacman -S gtk4 libadwaita mpv pkgconf`
+| Kısayol | İşlev |
+|---|---|
+| `Boşluk` / `k` | Oynat / Duraklat |
+| `f` | Tam ekran aç / kapat |
+| `s` | İntro (OP) sonuna atla |
+| `e` | Outro (ED) sonuna atla |
+| `m` | Sesi kapat / aç (Mute) |
+| `Yukarı / Aşağı` | Ses seviyesi artır / azalt |
+| `Sağ / Sol` | 5 saniye ileri / geri sar |
+| `Esc` | Geri dön / tam ekrandan çık |
+| `Ctrl+S` | Ana ekranda arama kutusunu aç |
+| `/` | Bölüm listesinde hızlı filtrele |
 
-Rust 1.74 ve üstü gerekir.
+---
 
+## Kaynaktan Derleme
+
+Gerekli sistem paketleri:
+- **Debian / Ubuntu**: `sudo apt install libgtk-4-dev libadwaita-1-dev libmpv-dev pkg-config`
+- **Fedora**: `sudo dnf install gtk4-devel libadwaita-devel mpv-libs-devel pkgconf-pkg-config`
+- **Arch Linux**: `sudo pacman -S gtk4 libadwaita mpv pkgconf`
+
+Derleme:
 ```bash
 git clone https://github.com/Lowell137/animecix-linux.git
 cd animecix-linux
@@ -79,48 +100,18 @@ cargo build --release
 ./target/release/animecix
 ```
 
-Eski işlemcilerde `Illegal instruction` almamak için derlemeden önce hedefi sabitle:
+---
 
-```bash
-export CFLAGS="-march=x86-64-v2 -O2"
-export CXXFLAGS="-march=x86-64-v2 -O2"
-export RUSTFLAGS="-C target-cpu=x86-64-v2"
-```
+## Veri Konumları
 
-`build_appimage.sh` bu değişkenleri kendisi ayarlar ve sürümü artırıp AppImage üretir. `GITHUB_TOKEN` tanımlıysa çıktıyı release olarak yükler:
-
-```bash
-export GITHUB_TOKEN=ghp_xxxxxxxx
-bash build_appimage.sh
-```
-
-## Güncelleme
-
-AppImage ile çalışıyorsa açılışta yeni sürümü kontrol eder. Ayarlar içindeki Otomatik Güncelleme açıksa onay sorup indirir, kurar ve yeniden başlatır. Dilersen aynı ekrandan elle denetleyebilirsin. Kaynaktan derlenen sürümde otomatik güncelleme kapalıdır.
-
-## Kısayollar
-
-| Kısayol | İşlev |
-|---|---|
-| `/` | Bölüm listesinde hızlı arama |
-| `Ctrl+S` | Ana ekranda arama açma |
-| `s` | İntro sonuna atlama |
-| `e` | Outro sonuna atlama |
-| `Esc` | Geri |
-
-Kısayollar Ayarlar ekranından değişir.
-
-## Veriler
-
-Ayarlar, geçmiş ve kapak önbelleği burada tutulur:
-
+Ayarlar, izleme geçmişi ve kapak önbelleği:
 ```
 ~/.local/share/animecix/
 ~/.cache/animecix/
 ```
 
-Ayarlar içindeki sıfırlama seçeneğiyle temizlenebilir.
+---
 
 ## Lisans
 
-[MIT](LICENSE)
+Bu proje [MIT Lisansı](LICENSE) altında dağıtılmaktadır.

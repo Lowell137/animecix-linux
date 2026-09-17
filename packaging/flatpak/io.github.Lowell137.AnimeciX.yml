@@ -19,6 +19,8 @@ finish-args:
   - --socket=wayland
   - --device=dri
   - --socket=pulseaudio
+  - --own-name=tr.com.animecix
+  - --talk-name=org.freedesktop.Notifications
 cleanup:
   - /include
   - /lib/pkgconfig

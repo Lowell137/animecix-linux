@@ -7,22 +7,20 @@
     <name>Lowell137</name>
   </developer>
   <name>AnimeciX</name>
-  <summary>Türkçe anime izleme uygulaması</summary>
-  <summary xml:lang="en">Turkish anime streaming client powered by mpv</summary>
+  <summary>Modern Türkçe anime izleme ve indirme istemcisi</summary>
+  <summary xml:lang="en">Modern Turkish anime streaming and downloading client</summary>
   <description>
     <p>
-      AnimeciX; Türkçe altyazılı anime dizilerini izlemek için tasarlanmış hafif ve hızlı bir masaüstü istemcisidir.
-      GTK4/libadwaita ile yazılan arayüz, video oynatmayı mpv'ye devreder.
+      AnimeciX; Linux masaüstü için geliştirilmiş modern, hafif ve hızlı bir Türkçe anime izleme istemcisidir.
+      GTK4 ve Libadwaita ile akıcı bir kullanıcı deneyimi sağlarken, video oynatımını donanım hızlandırmalı libmpv motoruna devreder.
     </p>
-    <p>Öne çıkanlar:</p>
+    <p>Öne Çıkan Özellikler:</p>
     <ul>
-      <li>Türkçe arayüz ve Türkçe altyazılı içerik desteği</li>
-      <li>Bölüm ve film indirme: çok bağlantılı hızlı indirme, kaldığı yerden devam, toplu indirme</li>
-      <li>Sayfalar menüsü (Ctrl+T): Ana Sayfa, Favoriler, Maraton, Geçmiş, İndirilenler, Ayarlar tek menüde</li>
-      <li>5 koyu tema: Koyu, Bordo, Orman, Lacivert, Mor</li>
-      <li>Focus Mod ve otomatik intro/outro atlama desteği</li>
-      <li>Kaldığın yerden devam etme ve sürükle-bırak sıralamalı izleme maratonu</li>
-      <li>Anime4K görsel iyileştirme modları</li>
+      <li>Focus Mod: AniSkip API ile açılış (OP) ve kapanış (ED) kısımlarını otomatik atlama, bölüm bittiğinde otomatik sonraki bölüme geçiş</li>
+      <li>Gömülü Oynatıcı: Tıklamayla açılan ses denetimi ve birleşik ayarlar menüsü ile sade kontroller</li>
+      <li>İndirme Yöneticisi: Çoklu bağlantı desteğiyle yüksek hızlı bölüm ve film indirme</li>
+      <li>İzleme Takibi: Favori listeleri, izleme geçmişi, maraton modu ve yayın takvimi</li>
+      <li>Kişiselleştirme: Koyu sistem temaları ve Anime4K görsel iyileştirme desteği</li>
     </ul>
   </description>
   <launchable type="desktop-id">io.github.Lowell137.AnimeciX.desktop</launchable>
@@ -33,11 +31,15 @@
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/player.png</image>
-      <caption>Oynatıcı</caption>
+      <caption>Gömülü video oynatıcı</caption>
     </screenshot>
     <screenshot>
       <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/episodes.png</image>
       <caption>Bölüm listesi</caption>
+    </screenshot>
+    <screenshot>
+      <image>https://raw.githubusercontent.com/Lowell137/animecix-linux/main/screenshots/downloads.png</image>
+      <caption>İndirme yöneticisi</caption>
     </screenshot>
   </screenshots>
   <provides>
@@ -46,7 +48,7 @@
   <releases>
     <release version="1.3.1" date="2026-09-17">
       <description>
-        <p>Focus Mod (AniSkip entegrasyonu ve otomatik bölüm geçişi), sadeleştirilmiş oynatıcı alt barı, kalıcı görünür ses kontrolü, birleşik ayarlar menüsü.</p>
+        <p>Focus Mod (AniSkip entegrasyonu ve otomatik bölüm geçişi), sadeleştirilmiş oynatıcı kontrolleri, kalıcı ses kaydırıcısı ve birleşik ayarlar menüsü.</p>
       </description>
     </release>
   </releases>

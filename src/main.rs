@@ -127,8 +127,9 @@ fn main() {
 
     std::env::set_var("MALLOC_ARENA_MAX", "2");
 
+    let app_id = std::env::var("FLATPAK_ID").unwrap_or_else(|_| "tr.com.animecix".to_string());
     let app = adw::Application::builder()
-        .application_id("tr.com.animecix")
+        .application_id(&app_id)
         .build();
 
     app.connect_activate(|app| {
@@ -559,7 +560,7 @@ fn main() {
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
 
-            if check_desktop_entry_installed() {
+            if std::env::var("FLATPAK_ID").is_err() && check_desktop_entry_installed() {
                 let home = std::env::var("HOME").unwrap_or_default();
                 let desktop_path =
                     format!("{home}/.local/share/applications/tr.com.animecix.desktop");
