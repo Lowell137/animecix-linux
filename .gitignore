@@ -13,6 +13,11 @@ favoriler_kapak_gecmisi.md
 *.AppImage
 AnimeciX.AppDir/
 appimagetool-x86_64.AppImage
+*.flatpak
+packaging/flatpak/build-dir/
+packaging/flatpak/repo/
+.flatpak-builder/
+packaging/flatpak/.flatpak-builder/
 assets/hicolor/index.theme
 
 # === Kalıntı / scratch dosyalar (yalnızca local'de kalır) ===

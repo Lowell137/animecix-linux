@@ -91,10 +91,13 @@ modules:
     buildsystem: simple
     build-options:
       append-path: /usr/lib/sdk/llvm18/bin
-      prepend-ld-library-path: /usr/lib/sdk/llvm18/lib
+      prepend-ld-library-path: /app/lib:/usr/lib/sdk/llvm18/lib
+      prepend-pkg-config-path: /app/lib/pkgconfig
       env:
         CARGO_HOME: /run/build/animecix/cargo
         LIBCLANG_PATH: /usr/lib/sdk/llvm18/lib
+        LIBRARY_PATH: /app/lib
+        RUSTFLAGS: -C link-arg=-L/app/lib
     build-commands:
       - cargo build --release --offline --locked
       - install -Dm755 target/release/animecix -t /app/bin
@@ -106,7 +109,6 @@ modules:
       - install -Dm644 assets/icon-512.png /app/share/icons/hicolor/512x512/apps/io.github.Lowell137.AnimeciX.png
       - mkdir -p /app/share/animecix/assets
       - cp -r assets/upscale /app/share/animecix/assets/
-      - chmod -R a-w /app/share/animecix/assets/upscale
     sources:
       - type: dir
         path: ../..
