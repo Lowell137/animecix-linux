@@ -4,10 +4,14 @@ runtime-version: '47'
 sdk: org.gnome.Sdk
 sdk-extensions:
   - org.freedesktop.Sdk.Extension.rust-stable
+  - org.freedesktop.Sdk.Extension.llvm18
 command: animecix
 separate-locales: false
 build-options:
-  append-path: /usr/lib/sdk/rust-stable/bin
+  append-path: /usr/lib/sdk/rust-stable/bin:/usr/lib/sdk/llvm18/bin
+  prepend-ld-library-path: /usr/lib/sdk/llvm18/lib
+  env:
+    LIBCLANG_PATH: /usr/lib/sdk/llvm18/lib
 finish-args:
   - --share=ipc
   - --share=network
@@ -86,8 +90,11 @@ modules:
   - name: animecix
     buildsystem: simple
     build-options:
+      append-path: /usr/lib/sdk/llvm18/bin
+      prepend-ld-library-path: /usr/lib/sdk/llvm18/lib
       env:
         CARGO_HOME: /run/build/animecix/cargo
+        LIBCLANG_PATH: /usr/lib/sdk/llvm18/lib
     build-commands:
       - cargo build --release --offline --locked
       - install -Dm755 target/release/animecix -t /app/bin
