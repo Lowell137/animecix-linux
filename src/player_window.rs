@@ -1981,18 +1981,43 @@ pub fn build_embedded_player(
                 status_c.set_text(&msg);
             }
 
-            // --- AniSkip prompt ---
+            // --- AniSkip & Focus Mod ---
             if aniskip_on {
                 let snap = s.aniskip.lock().unwrap().clone();
-                if let Some(st) = snap.op_start {
-                    if !s.op_prompted && pos >= (st - 1.5) && pos <= (st + 25.0) {
+                if let (Some(st), Some(end)) = (snap.op_start, snap.op_end) {
+                    if s.focus_mode && !s.op_seek_done && pos >= (st - 0.5) && pos < end {
+                        s.op_seek_done = true;
+                        s.op_prompted = true;
+                        s.player.seek_abs(end);
+                        s.player.show_text("⏩ İntro otomatik atlandı (Focus Mod)", 3000);
+                        toast_in(&toast_c, "⏩ İntro otomatik atlandı", 3);
+                    } else if !s.op_prompted && pos >= (st - 1.5) && pos <= (st + 25.0) {
                         s.op_prompted = true;
                         s.player.show_text("⏩ İntro Başladı ('s' ile atlayabilirsiniz)", 7000);
                         toast_in(&toast_c, "⏩ İntro başladı — 's' ile atla", 4);
                     }
                 }
-                if let Some(st) = snap.ed_start {
-                    if !s.ed_prompted && pos >= (st - 1.5) && pos <= (st + 25.0) {
+                if let (Some(st), Some(end)) = (snap.ed_start, snap.ed_end) {
+                    if s.focus_mode && !s.ed_seek_done && pos >= (st - 0.5) {
+                        s.ed_seek_done = true;
+                        s.ed_prompted = true;
+                        if s.auto_next_episode && s.next_ep.is_some() && !s.next_triggered {
+                            s.next_triggered = true;
+                            let next = s.next_ep.clone().unwrap();
+                            if let Some(ref play_fn) = s.play_episode {
+                                s.player.show_text("⏭️ Sonraki bölüme geçiliyor (Focus Mod)...", 3000);
+                                toast_in(&toast_c, "⏭️ Sonraki bölüme geçiliyor...", 3);
+                                let play = play_fn.clone();
+                                glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                                    play(next);
+                                });
+                            }
+                        } else {
+                            s.player.seek_abs(end);
+                            s.player.show_text("🏁 Outro otomatik atlandı (Focus Mod)", 3000);
+                            toast_in(&toast_c, "🏁 Outro otomatik atlandı", 3);
+                        }
+                    } else if !s.ed_prompted && pos >= (st - 1.5) && pos <= (st + 25.0) {
                         s.ed_prompted = true;
                         s.player.show_text("🏁 Outro Başladı ('e' ile atlayabilirsiniz)", 7000);
                         toast_in(&toast_c, "🏁 Outro başladı — 'e' ile atla", 4);
@@ -2018,6 +2043,18 @@ pub fn build_embedded_player(
                         &api::Watched { title_id: tid, episode: s.episode, season: s.season },
                         "",
                     );
+                }
+                if (s.auto_next_episode || s.focus_mode) && s.next_ep.is_some() && !s.next_triggered {
+                    s.next_triggered = true;
+                    let next = s.next_ep.clone().unwrap();
+                    if let Some(ref play_fn) = s.play_episode {
+                        s.player.show_text("⏭️ Sonraki bölüme geçiliyor...", 3000);
+                        toast_in(&toast_c, "⏭️ Sonraki bölüme geçiliyor...", 3);
+                        let play = play_fn.clone();
+                        glib::timeout_add_local_once(Duration::from_millis(500), move || {
+                            play(next);
+                        });
+                    }
                 }
                 status_c.set_text("bitti ✓");
                 return glib::ControlFlow::Continue;

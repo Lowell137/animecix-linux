@@ -132,9 +132,12 @@ if [ ! -f "$ICON_PATH" ]; then
     curl -sSL -o "$ICON_PATH" "https://raw.githubusercontent.com/$REPO/main/assets/hicolor/256x256/apps/tr.com.animecix.png" || true
 fi
 
-# 6. .desktop başlatıcı dosyası oluştur (Menü ve arama için)
+# 6. .desktop başlatıcı dosyası (Gear Lever yoksa ve menüde henüz yoksa oluşturulur)
 DESKTOP_FILE="$DESKTOP_DIR/tr.com.animecix.desktop"
-cat > "$DESKTOP_FILE" <<EOF
+if command -v gearlever >/dev/null 2>&1 || [ -d "$HOME/.local/share/gearlever" ] || [ -d "$HOME/.var/app/it.mijorus.gearlever" ]; then
+    echo "==> Gear Lever tespit edildi, menü kısayol yönetimi Gear Lever'a bırakılıyor."
+elif [ ! -f "$DESKTOP_FILE" ]; then
+    cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Name=AnimeciX
 Comment=Türkçe Anime İzleme Uygulaması
@@ -146,11 +149,10 @@ Categories=AudioVideo;Video;Network;
 StartupWMClass=tr.com.animecix
 MimeType=x-scheme-handler/animecix;
 EOF
-chmod +x "$DESKTOP_FILE"
-
-# Masaüstü veritabanını güncelle
-if command -v update-desktop-database >/dev/null 2>&1; then
-    update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+    chmod +x "$DESKTOP_FILE"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database "$DESKTOP_DIR" >/dev/null 2>&1 || true
+    fi
 fi
 
 echo ""
