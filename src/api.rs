@@ -589,6 +589,8 @@ pub struct Settings {
     pub focus_mode: bool,
     #[serde(default = "default_true")]
     pub auto_next_episode: bool,
+    #[serde(default = "default_false")]
+    pub welcome_seen: bool,
 }
 fn default_loading() -> String { "overlay".into() }
 fn default_quick_search() -> bool { true }
@@ -693,6 +695,7 @@ impl Default for Settings {
             sidebar_collapsed: false,
             focus_mode: false,
             auto_next_episode: true,
+            welcome_seen: false,
         }
     }
 }
@@ -2514,13 +2517,22 @@ impl Client {
 
 
     pub fn state_path() -> PathBuf {
-        let mut p = if let Ok(d) = std::env::var("ANIMECIX_STATE_DIR") {
-            PathBuf::from(d)
+        if let Ok(d) = std::env::var("ANIMECIX_STATE_DIR") {
+            let mut p = PathBuf::from(d);
+            p.push("state.json");
+            p
         } else {
-            dirs_cache_or_home()
-        };
-        p.push("state.json");
-        p
+            let mut p = dirs_cache_or_home();
+            p.push(".local/share/animecix/state.json");
+            if !p.exists() {
+                let mut old = dirs_cache_or_home();
+                old.push("state.json");
+                if old.exists() {
+                    return old;
+                }
+            }
+            p
+        }
     }
 
     pub fn load_state(&self) -> State {
@@ -3140,10 +3152,14 @@ impl Client {
     }
 
     pub fn is_welcome_seen(&self) -> bool {
-        self.load_state().welcome_seen
+        self.load_settings().welcome_seen || self.load_state().welcome_seen
     }
 
     pub fn set_welcome_seen(&self, seen: bool) {
+        let mut set = self.load_settings();
+        set.welcome_seen = seen;
+        self.save_settings(&set);
+
         let mut st = self.load_state();
         st.welcome_seen = seen;
         self.save_state(&st);

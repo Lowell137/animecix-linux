@@ -133,7 +133,6 @@ fn main() {
         .build();
 
     app.connect_activate(|app| {
-        let mut migrated = false;
         if let Some(display) = gtk::gdk::Display::default() {
             // İkonlar her zaman Adwaita olsun: sistem teması (örn. macOS
             // klonu) medya kontrol gliflerini bozuyor/kendi tarzına
@@ -560,20 +559,6 @@ fn main() {
                 gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
             );
 
-            if std::env::var("FLATPAK_ID").is_err() && check_desktop_entry_installed() {
-                let home = std::env::var("HOME").unwrap_or_default();
-                let desktop_path =
-                    format!("{home}/.local/share/applications/tr.com.animecix.desktop");
-                if !home.is_empty() {
-                    if let Some(old_exec) = parse_desktop_exec(&desktop_path) {
-                        migrated = old_exec != desktop_exec_target(&home);
-                    }
-                }
-                let _ = install_desktop_entry();
-                if migrated {
-                    eprintln!("[STARTUP] kurulu kısayol yeni çalıştırılan AppImage'a taşındı");
-                }
-            }
         }
         let app_inst = App::new(app);
         // Teşhis bayrağı: yerleşim ölçülerini dök.
@@ -618,21 +603,7 @@ fn main() {
             let s = app_inst.settings.borrow();
             (s.auto_update, s.notify_uptodate)
         };
-        if migrated {
-            let dlg = adw::MessageDialog::builder()
-                .heading("AnimeciX Güncellendi")
-                .body(format!(
-                    "AnimeciX sürümünüz v{} olarak değiştirildi.",
-                    update::CURRENT_VERSION
-                ))
-                .close_response("ok")
-                .default_response("ok")
-                .build();
-            dlg.add_response("ok", "Tamam");
-            dlg.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
-            dlg.set_transient_for(Some(&app_inst.window));
-            dlg.present();
-        } else if auto_update && update::is_appimage() {
+        if auto_update && update::is_appimage() {
             let app_c = app_inst.clone();
             update::check_and_prompt(
                 &app_inst.window,
