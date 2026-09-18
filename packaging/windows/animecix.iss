@@ -41,17 +41,19 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "..\..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
+Source: "AnimeciX.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "AnimeciX.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
-Name: "{group}\AnimeciX"; Filename: "{app}\AnimeciX.bat"; WorkingDir: "{app}"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
-Name: "{autodesktop}\AnimeciX"; Filename: "{app}\AnimeciX.bat"; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
+Name: "{group}\AnimeciX"; Filename: "{win}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
+Name: "{group}\AnimeciX (Konsollu)"; Filename: "{app}\AnimeciX.bat"; WorkingDir: "{app}"; Comment: "AnimeciX hata ayiklama (konsol acar)"
+Name: "{autodesktop}\AnimeciX"; Filename: "{win}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
 
 [Run]
-Filename: "{app}\AnimeciX.bat"; Description: "{cm:LaunchProgram,AnimeciX}"; Flags: nowait postinstall skipifsilent shellexec
+Filename: "{win}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; Description: "{cm:LaunchProgram,AnimeciX}"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
 function MsysRuntimeOK(): Boolean;
