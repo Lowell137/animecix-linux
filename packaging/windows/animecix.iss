@@ -30,6 +30,8 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 WizardStyle=modern
+SetupIconFile=animecix.ico
+UninstallDisplayIcon={app}\animecix.ico
 UninstallDisplayName=AnimeciX 1.3.1 (Windows port)
 
 [Languages]
@@ -43,14 +45,15 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Source: "..\..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 Source: "AnimeciX.vbs"; DestDir: "{app}"; Flags: ignoreversion
 Source: "AnimeciX.bat"; DestDir: "{app}"; Flags: ignoreversion
+Source: "animecix.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\assets\*"; DestDir: "{app}\assets"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
-Name: "{group}\AnimeciX"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
-Name: "{group}\AnimeciX (Konsollu)"; Filename: "{app}\AnimeciX.bat"; WorkingDir: "{app}"; Comment: "AnimeciX hata ayiklama (konsol acar)"
-Name: "{autodesktop}\AnimeciX"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
+Name: "{group}\AnimeciX"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; IconFilename: "{app}\animecix.ico"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
+Name: "{group}\AnimeciX (Konsollu)"; Filename: "{app}\AnimeciX.bat"; WorkingDir: "{app}"; IconFilename: "{app}\animecix.ico"; Comment: "AnimeciX hata ayiklama (konsol acar)"
+Name: "{autodesktop}\AnimeciX"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon; IconFilename: "{app}\animecix.ico"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
 
 [Run]
 Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; Description: "{cm:LaunchProgram,AnimeciX}"; Flags: nowait postinstall skipifsilent shellexec
