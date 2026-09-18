@@ -115,6 +115,7 @@ pub fn range_header(have: u64) -> Option<String> {
 }
 
 /// Hedef dizinde boş alan (bayt). Öğrenilemezse None.
+#[cfg(unix)]
 pub fn free_space(path: &Path) -> Option<u64> {
     let anchor = if path.exists() { path.to_path_buf() } else { path.parent()?.to_path_buf() };
     let c = std::ffi::CString::new(anchor.to_string_lossy().as_bytes()).ok()?;
@@ -123,6 +124,38 @@ pub fn free_space(path: &Path) -> Option<u64> {
         return None;
     }
     (stat.f_bavail as u64).checked_mul(stat.f_frsize as u64)
+}
+
+#[cfg(windows)]
+pub fn free_space(path: &Path) -> Option<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    let anchor = if path.exists() { path.to_path_buf() } else { path.parent()?.to_path_buf() };
+    let mut wide: Vec<u16> = anchor.as_os_str().encode_wide().collect();
+    wide.push(0);
+    let mut free_bytes_available_to_caller: u64 = 0;
+    let mut total_number_of_bytes: u64 = 0;
+    let mut total_number_of_free_bytes: u64 = 0;
+    extern "system" {
+        fn GetDiskFreeSpaceExW(
+            lpDirectoryName: *const u16,
+            lpFreeBytesAvailableToCaller: *mut u64,
+            lpTotalNumberOfBytes: *mut u64,
+            lpTotalNumberOfFreeBytes: *mut u64,
+        ) -> i32;
+    }
+    let res = unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut free_bytes_available_to_caller,
+            &mut total_number_of_bytes,
+            &mut total_number_of_free_bytes,
+        )
+    };
+    if res != 0 {
+        Some(free_bytes_available_to_caller)
+    } else {
+        None
+    }
 }
 
 fn build_client_for(_url: &str) -> Result<reqwest::blocking::Client, String> {

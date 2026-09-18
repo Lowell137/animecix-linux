@@ -395,7 +395,16 @@ impl App {
         // ---- üst bar: arama (solda) + menü (sağda) ----
         let side_head = gtk::Box::new(gtk::Orientation::Horizontal, 6);
         side_head.set_margin_bottom(4);
-        let side_search_btn = gtk::Button::from_icon_name("animecix-search-symbolic");
+        let resolve_icon = |preferred: &'static str, fallback: &'static str| -> &'static str {
+            if let Some(disp) = gtk::gdk::Display::default() {
+                if gtk::IconTheme::for_display(&disp).has_icon(preferred) {
+                    return preferred;
+                }
+            }
+            fallback
+        };
+        let search_icon = resolve_icon("animecix-search-symbolic", "system-search-symbolic");
+        let side_search_btn = gtk::Button::from_icon_name(search_icon);
         side_search_btn.add_css_class("flat");
         side_search_btn.add_css_class("circular");
         side_search_btn.add_css_class("side-head-btn");
@@ -418,7 +427,8 @@ impl App {
         let marathon_btn = side_row(&sidebar, &side_items, SidebarId::Marathon, "Maraton", "media-playlist-consecutive-symbolic", "İzleme Maratonu");
         let hist_btn = side_row(&sidebar, &side_items, SidebarId::History, "Geçmiş", "document-open-recent-symbolic", "İzleme Geçmişi");
         let cal_btn = side_row(&sidebar, &side_items, SidebarId::Calendar, "Takvim", "x-office-calendar-symbolic", "Yayın Takvimi");
-        let news_btn = side_row(&sidebar, &side_items, SidebarId::News, "Haberler", "animecix-news-symbolic", "Anime Haberleri");
+        let news_icon = resolve_icon("animecix-news-symbolic", "help-about-symbolic");
+        let news_btn = side_row(&sidebar, &side_items, SidebarId::News, "Haberler", news_icon, "Anime Haberleri");
 
         let side_spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
         side_spacer.set_vexpand(true);
@@ -427,7 +437,8 @@ impl App {
 
         // Daraltma satırı: diğer satırlarla aynı yapıda (hizalama otomatik),
         // Ayarlar'ın hemen üstünde. İkon + yazı duruma göre güncellenir.
-        let side_collapse_btn = side_row(&sidebar, &side_items, SidebarId::Collapse, "Daralt", "animecix-sidebar-symbolic", "Yan menüyü daralt/genişlet");
+        let collapse_icon = resolve_icon("animecix-sidebar-symbolic", "sidebar-show-symbolic");
+        let side_collapse_btn = side_row(&sidebar, &side_items, SidebarId::Collapse, "Daralt", collapse_icon, "Yan menüyü daralt/genişlet");
 
         // Ayarlar hamburger menüde (üst bar); sidebar'da satırı yok.
 
@@ -1037,11 +1048,21 @@ impl App {
                 }
             }
             if it.id == SidebarId::Collapse {
-                it.icon.set_icon_name(Some(if collapsed {
-                    "animecix-sidebar-symbolic"
+                let disp = gtk::gdk::Display::default();
+                let icon_name = if collapsed {
+                    if disp.as_ref().map(|d| gtk::IconTheme::for_display(d).has_icon("animecix-sidebar-symbolic")).unwrap_or(false) {
+                        "animecix-sidebar-symbolic"
+                    } else {
+                        "sidebar-show-symbolic"
+                    }
                 } else {
-                    "animecix-sidebar-collapse-symbolic"
-                }));
+                    if disp.as_ref().map(|d| gtk::IconTheme::for_display(d).has_icon("animecix-sidebar-collapse-symbolic")).unwrap_or(false) {
+                        "animecix-sidebar-collapse-symbolic"
+                    } else {
+                        "sidebar-show-right-symbolic"
+                    }
+                };
+                it.icon.set_icon_name(Some(icon_name));
             }
         }
     }

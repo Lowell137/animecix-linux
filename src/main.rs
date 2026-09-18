@@ -41,49 +41,67 @@ fn ensure_sidebar_icon() {
     const SEARCH_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-search-symbolic.svg");
     let dark = adw::StyleManager::default().is_dark();
     let fill = if dark { "#e8e8e8" } else { "#222222" };
-    let home = std::env::var("HOME").unwrap_or_default();
-    if home.is_empty() {
-        return;
+
+    let mut target_dirs: Vec<(String, String)> = Vec::new();
+    #[cfg(unix)]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            target_dirs.push((format!("{home}/.local/share/icons/hicolor/scalable/actions"), format!("{home}/.local/share/icons/hicolor")));
+        }
     }
-    let dir = format!("{home}/.local/share/icons/hicolor/scalable/actions");
-    let mut changed = false;
-    for (name, src) in [
-        ("animecix-sidebar-symbolic.svg", OPEN_SVG),
-        ("animecix-sidebar-collapse-symbolic.svg", COLLAPSED_SVG),
-        ("animecix-news-symbolic.svg", NEWS_SVG),
-        ("animecix-search-symbolic.svg", SEARCH_SVG),
-    ] {
-        let content = src.replace("#222222", fill);
-        let path = format!("{dir}/{name}");
-        let same = std::fs::read_to_string(&path).ok() == Some(content.clone());
-        if !same {
-            if std::fs::create_dir_all(&dir).is_ok() {
-                if std::fs::write(&path, content.as_bytes()).is_ok() {
-                    changed = true;
+    #[cfg(windows)]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let base_hicolor = format!("{local}/animecix/icons/hicolor");
+            target_dirs.push((format!("{base_hicolor}/scalable/actions"), base_hicolor));
+        }
+        if std::path::Path::new("C:/msys64/ucrt64/share/icons/hicolor").exists() {
+            target_dirs.push(("C:/msys64/ucrt64/share/icons/hicolor/scalable/actions".to_string(), "C:/msys64/ucrt64/share/icons/hicolor".to_string()));
+        }
+    }
+
+    for (dir, hicolor_base) in target_dirs {
+        let index_path = format!("{hicolor_base}/index.theme");
+        if !std::path::Path::new(&index_path).exists() {
+            let _ = std::fs::create_dir_all(&hicolor_base);
+            let _ = std::fs::write(&index_path, "[Icon Theme]\nName=Hicolor\nComment=Fallback theme\nDirectories=scalable/actions\n\n[scalable/actions]\nSize=16\nMinSize=1\nMaxSize=512\nType=Scalable\nContext=Actions\n");
+        }
+        let mut changed = false;
+        for (name, src) in [
+            ("animecix-sidebar-symbolic.svg", OPEN_SVG),
+            ("animecix-sidebar-collapse-symbolic.svg", COLLAPSED_SVG),
+            ("animecix-news-symbolic.svg", NEWS_SVG),
+            ("animecix-search-symbolic.svg", SEARCH_SVG),
+        ] {
+            let content = src.replace("#222222", fill);
+            let path = format!("{dir}/{name}");
+            let same = std::fs::read_to_string(&path).ok() == Some(content.clone());
+            if !same {
+                if std::fs::create_dir_all(&dir).is_ok() {
+                    if std::fs::write(&path, content.as_bytes()).is_ok() {
+                        changed = true;
+                    }
                 }
             }
         }
-    }
-    // Yeni eklenen ikon, bayat icon-theme.cache tarafından gölgeleniyorsa
-    // GTK onu bulamaz (boş/bozuk görünür) — önbelleği tazele ya da sil.
-    if changed {
-        refresh_hicolor_cache(&format!("{home}/.local/share/icons/hicolor"));
+        if changed {
+            refresh_hicolor_cache(&hicolor_base);
+        }
     }
 }
 
-/// `~/.local/share/icons/hicolor` önbelleğini tazeler; araç yoksa
+/// `~/.local/share/icons/hicolor` veya Windows icon dizini önbelleğini tazeler; araç yoksa
 /// bayat `icon-theme.cache` dosyasını siler (GTK dizini tarar, zararsız).
 fn refresh_hicolor_cache(hicolor_dir: &str) {
     let cache = format!("{hicolor_dir}/icon-theme.cache");
-    if !std::path::Path::new(&cache).exists() {
-        return;
-    }
-    let updated = std::process::Command::new("gtk-update-icon-cache")
+    let cmd = if cfg!(windows) { "gtk-update-icon-cache.exe" } else { "gtk-update-icon-cache" };
+    let updated = std::process::Command::new(cmd)
         .args(["-f", "-t", hicolor_dir])
         .output()
         .map(|o| o.status.success())
         .unwrap_or(false);
-    if !updated {
+    if !updated && std::path::Path::new(&cache).exists() {
         let _ = std::fs::remove_file(&cache);
     }
 }
@@ -152,7 +170,15 @@ fn main() {
             }
 
             let theme = gtk::IconTheme::for_display(&display);
+            #[cfg(windows)]
+            if let Ok(local) = std::env::var("LOCALAPPDATA") {
+                theme.add_search_path(format!("{local}/animecix/icons"));
+            }
+            theme.add_search_path("assets");
             theme.add_search_path(base.join("assets"));
+            if let Some(parent) = base.parent().and_then(|p| p.parent()) {
+                theme.add_search_path(parent.join("assets"));
+            }
             theme.add_search_path(base.join("usr/share/icons"));
 
             let css = gtk::CssProvider::new();
@@ -660,12 +686,17 @@ pub fn check_all_dependencies() -> Vec<DepStatus> {
 }
 
 pub fn check_desktop_entry_installed() -> bool {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let p1 = std::path::Path::new(&format!("{home}/.local/share/applications/tr.com.animecix.desktop")).exists();
-    let p2 = std::path::Path::new(&format!("{home}/.local/share/applications/animecix.desktop")).exists();
-    let p3 = std::path::Path::new("/usr/share/applications/tr.com.animecix.desktop").exists();
-    let p4 = std::path::Path::new("/usr/share/applications/animecix.desktop").exists();
-    p1 || p2 || p3 || p4
+    #[cfg(not(target_os = "linux"))]
+    return false;
+    #[cfg(target_os = "linux")]
+    {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let p1 = std::path::Path::new(&format!("{home}/.local/share/applications/tr.com.animecix.desktop")).exists();
+        let p2 = std::path::Path::new(&format!("{home}/.local/share/applications/animecix.desktop")).exists();
+        let p3 = std::path::Path::new("/usr/share/applications/tr.com.animecix.desktop").exists();
+        let p4 = std::path::Path::new("/usr/share/applications/animecix.desktop").exists();
+        p1 || p2 || p3 || p4
+    }
 }
 
 pub fn check_and_auto_update_installation() {
@@ -704,6 +735,10 @@ pub fn parse_desktop_exec(path: &str) -> Option<String> {
 }
 
 pub fn install_desktop_entry() -> Result<(), String> {
+    #[cfg(not(target_os = "linux"))]
+    return Ok(());
+    #[cfg(target_os = "linux")]
+    {
     let home = std::env::var("HOME").map_err(|_| "HOME klasörü bulunamadı".to_string())?;
 
     let exec_target = desktop_exec_target(&home);
@@ -797,6 +832,7 @@ pub fn install_desktop_entry() -> Result<(), String> {
         .output();
 
     Ok(())
+    }
 }
 
 pub fn uninstall_application() {

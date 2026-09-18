@@ -40,10 +40,30 @@ pub struct RenderContext {
 unsafe impl Send for RenderContext {}
 
 /// GL fonksiyon adresi çözümleyici.
-/// GTK4 epoxy/GL driver'ı önceden yüklediği için RTLD_DEFAULT yeterlidir.
-/// Bu sayede hem GLX (X11/XWayland) hem EGL (Wayland) çalışır.
+/// Linux'ta GTK4 epoxy/GL driver'ı önceden yüklediği için RTLD_DEFAULT yeterlidir.
+/// Windows'ta wglGetProcAddress ve opengl32.dll kullanılır.
+#[cfg(unix)]
 unsafe extern "C" fn get_proc_addr(_ctx: *mut c_void, name: *const c_char) -> *mut c_void {
     libc::dlsym(libc::RTLD_DEFAULT, name)
+}
+
+#[cfg(windows)]
+unsafe extern "C" fn get_proc_addr(_ctx: *mut c_void, name: *const c_char) -> *mut c_void {
+    extern "system" {
+        fn wglGetProcAddress(name: *const c_char) -> *mut c_void;
+        fn GetModuleHandleA(lpModuleName: *const c_char) -> *mut c_void;
+        fn GetProcAddress(hModule: *mut c_void, lpProcName: *const c_char) -> *mut c_void;
+    }
+    let p = wglGetProcAddress(name);
+    let val = p as usize;
+    if !p.is_null() && val != 1 && val != 2 && val != 3 && val != usize::MAX {
+        return p;
+    }
+    let hmod = GetModuleHandleA(b"opengl32.dll\0".as_ptr() as *const c_char);
+    if !hmod.is_null() {
+        return GetProcAddress(hmod, name);
+    }
+    std::ptr::null_mut()
 }
 
 impl RenderContext {
@@ -154,8 +174,16 @@ impl Drop for RenderContext {
 pub fn current_fbo() -> i32 {
     const GL_DRAW_FRAMEBUFFER_BINDING: u32 = 0x8CA6;
     type GlGetIntegervFn = unsafe extern "C" fn(pname: u32, params: *mut i32);
-    let sym =
-        unsafe { libc::dlsym(libc::RTLD_DEFAULT, b"glGetIntegerv\0".as_ptr() as *const c_char) };
+    let sym = unsafe {
+        #[cfg(unix)]
+        {
+            libc::dlsym(libc::RTLD_DEFAULT, b"glGetIntegerv\0".as_ptr() as *const c_char)
+        }
+        #[cfg(windows)]
+        {
+            get_proc_addr(std::ptr::null_mut(), b"glGetIntegerv\0".as_ptr() as *const c_char)
+        }
+    };
     if sym.is_null() {
         return 0;
     }
@@ -365,8 +393,17 @@ impl MpvEmbed {
         extra_opts: &[(&str, &str)],
     ) -> Result<Self> {
         // GTK LC_ALL'i resetler; mpv sayı parse'ı bozulmasın diye.
+        #[cfg(unix)]
         unsafe {
             libc::setlocale(libc::LC_NUMERIC, b"C\0".as_ptr() as *const c_char);
+        }
+        #[cfg(windows)]
+        unsafe {
+            extern "C" {
+                fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
+            }
+            const LC_NUMERIC: c_int = 4;
+            setlocale(LC_NUMERIC, b"C\0".as_ptr() as *const c_char);
         }
 
         let ctx = unsafe { libmpv_sys::mpv_create() };

@@ -1,3 +1,15 @@
+#[cfg(not(unix))]
+fn main() {
+    println!("test_progress is only supported on Unix.");
+}
+
+#[cfg(unix)]
+fn main() {
+    unix::main();
+}
+
+#[cfg(unix)]
+mod unix {
 use std::io::{BufRead, BufReader, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::mpsc;
@@ -62,7 +74,7 @@ fn query_mpv_prop_test(sock: &str, prop: &str) -> Option<f64> {
     v["data"].as_f64()
 }
 
-fn main() {
+pub fn main() {
     let _ = std::fs::remove_file(SOCKET_PATH);
 
     let start = Instant::now();
@@ -276,4 +288,5 @@ fn main() {
     println!("========================================");
 
     let _ = std::fs::remove_file(SOCKET_PATH);
+}
 }
