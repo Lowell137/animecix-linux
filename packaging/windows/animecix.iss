@@ -48,12 +48,12 @@ Source: "..\..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\README.md"; DestDir: "{app}"; Flags: ignoreversion isreadme
 
 [Icons]
-Name: "{group}\AnimeciX"; Filename: "{win}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
+Name: "{group}\AnimeciX"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
 Name: "{group}\AnimeciX (Konsollu)"; Filename: "{app}\AnimeciX.bat"; WorkingDir: "{app}"; Comment: "AnimeciX hata ayiklama (konsol acar)"
-Name: "{autodesktop}\AnimeciX"; Filename: "{win}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
+Name: "{autodesktop}\AnimeciX"; Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; WorkingDir: "{app}"; Tasks: desktopicon; Comment: "AnimeciX - Turkce anime izleme (Windows port)"
 
 [Run]
-Filename: "{win}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; Description: "{cm:LaunchProgram,AnimeciX}"; Flags: nowait postinstall skipifsilent shellexec
+Filename: "{sys}\wscript.exe"; Parameters: """{app}\AnimeciX.vbs"""; Description: "{cm:LaunchProgram,AnimeciX}"; Flags: nowait postinstall skipifsilent shellexec
 
 [Code]
 function MsysRuntimeOK(): Boolean;
