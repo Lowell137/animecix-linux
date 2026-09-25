@@ -36,6 +36,8 @@ pub struct EmbedRequest {
     pub fast_embeds: Vec<String>,
     /// JIT çözülecek yedek embed URL'leri.
     pub fallback_embeds: Vec<String>,
+    /// API'nin kaynak başına verdiği kalite etiketi (embed url → "1080p" vb.).
+    pub quality_map: std::collections::HashMap<String, String>,
     pub saved_pos: Option<f64>,
     pub upscale: String,
     pub aniskip_enabled: bool,
@@ -74,14 +76,14 @@ struct PlayerState {
     render_ctx: Option<RenderContext>,
     player: MpvEmbed,
     sources: Vec<Source>,
+    /// `sources` ile aynı sıralı: API'nin verdiği kalite etiketi (çözünürlük).
+    source_quality: Vec<Option<String>>,
     /// Şu an yüklenen/yüklenmekte olan kaynak index'i.
     index: usize,
     /// Kaynak yükleme başlangıcı (dead-source timeout için).
     load_started: Instant,
     /// Bu kaynakta süre görüldü mü (medya yüklendi sayılır).
     media_loaded: bool,
-    /// "Oynatılıyor" durumu gösterildi mi (status satırı için).
-    playing_shown: bool,
     /// Arka planda embed çözümü sürüyor mu.
     resolving: bool,
     resolve_result: Arc<Mutex<Option<Result<String, String>>>>,
@@ -125,6 +127,12 @@ struct PlayerState {
     cursor_hidden: bool,
     /// Üst yüzen bar (geri + başlık + pencere düğmeleri, kromla gizlenir).
     topbar: gtk::Revealer,
+    /// Ekranın tam ortasındaki taşıma kümesi (önceki/−10/oynat/+10/sonraki), kromla gizlenir.
+    center_cluster: gtk::Revealer,
+    /// Sağ kenar bölüm listesi hover şeridi (kromla gizlenir/gösterilir).
+    ep_strip: gtk::Revealer,
+    /// Video üstü karartma/gölgeleme katmanı (kromla gizlenir).
+    shade: gtk::Revealer,
     /// Tam ekranda üst+alt bar gizli mi.
     chrome_hidden: bool,
     /// Tam ekranı biz açtıysak shutdown'da geri al.
@@ -133,11 +141,12 @@ struct PlayerState {
     click_pending: Rc<Cell<bool>>,
     /// Header'daki hareket dinleyici (shutdown'da kaldırılır).
     header_motion: Option<gtk::EventControllerMotion>,
-    /// Ortada parlayan ikon (oynat/duraklat geri bildirimi).
-    flash_img: gtk::Image,
-    flash_rev: gtk::Revealer,
     /// Kaynak boyutları (candidates sırasıyla; yedekler None).
     sizes: Arc<Mutex<Vec<Option<u64>>>>,
+    /// Kaynak çözünürlükleri (sources sırasıyla; tau değilse None). Arka planda çözülür.
+    source_res: Arc<Mutex<Vec<Option<String>>>>,
+    /// Tau embed'leri için çözülen dinamik kalite merdiveni: (etiket, video_url)
+    tau_qualities: Arc<Mutex<Vec<(String, String)>>>,
     /// Sunucuya son konum raporu (60sn'de bir).
     last_report: Instant,
 }
@@ -168,6 +177,9 @@ impl EmbeddedPlayer {
         s.player.stop();
         // Render callback'in çizecek bir şeyi kalmasın; stack çocuğu
         // kaldırılırken ölü FBO'ya çizim olmasın.
+        // mpv_render_context_free GL context CURRENT iken çağrılmalı;
+        // yoksa sürücü durumu bozulur — çıkışta pencere beyaz/bozuk kalır.
+        let _ = s.gl_area.make_current();
         s.render_ctx = None;
         // sinema modunu geri al
         s.we_fullscreened = false;
@@ -291,9 +303,11 @@ fn hide_chrome_locked(s: &mut PlayerState, controls: &gtk::Revealer) {
     s.chrome_hidden = true;
     s.hidden_at = Some(Instant::now());
     s.hide_mx = s.last_mx;
-    s.hide_my = s.last_my;
+    s.shade.set_reveal_child(false);
     controls.set_reveal_child(false);
     s.topbar.set_reveal_child(false);
+    s.center_cluster.set_reveal_child(false);
+    s.ep_strip.set_reveal_child(false);
     if !s.cursor_hidden {
         s.cursor_hidden = true;
         s.gl_area.set_cursor_from_name(Some("none"));
@@ -310,8 +324,11 @@ fn show_chrome_locked(s: &mut PlayerState, controls: &gtk::Revealer) {
         s.chrome_hidden = false;
         changed = true;
     }
+    s.shade.set_reveal_child(true);
     controls.set_reveal_child(true);
     s.topbar.set_reveal_child(true);
+    s.center_cluster.set_reveal_child(true);
+    s.ep_strip.set_reveal_child(true);
     if s.cursor_hidden {
         s.cursor_hidden = false;
         s.gl_area.set_cursor_from_name(None);
@@ -342,8 +359,11 @@ fn set_fullscreen(state: &Rc<RefCell<PlayerState>>, controls: &gtk::Revealer, on
             s.hide_my = s.last_my;
             s.gl_area.set_cursor_from_name(None);
         }
+        state.borrow().shade.set_reveal_child(true);
         controls.set_reveal_child(true);
         state.borrow().topbar.set_reveal_child(true);
+        state.borrow().center_cluster.set_reveal_child(true);
+        state.borrow().ep_strip.set_reveal_child(true);
     } else {
         eprintln!("[EMBED] tam ekrandan çıkılıyor");
         {
@@ -479,36 +499,11 @@ fn safe_fname(s: &str) -> String {
     }
     o
 }
-fn flash(state: &Rc<RefCell<PlayerState>>, icon: &str) {
-    let s = state.borrow();
-    s.flash_img.set_icon_name(Some(icon));
-    s.flash_rev.set_reveal_child(true);
-    let rev_c = s.flash_rev.clone();
-    let alive_c = s.alive.clone();
-    drop(s);
-    glib::timeout_add_local_once(Duration::from_millis(550), move || {
-        if alive_c.load(Ordering::Relaxed) {
-            rev_c.set_reveal_child(false);
-        }
-    });
-}
-
-/// Oynat/duraklat + ortada ikon. paused=true dönerse video durdu.
+/// Oynat/duraklat. paused=true dönerse video durdu.
 fn toggle_with_flash(state: &Rc<RefCell<PlayerState>>) -> bool {
-    let paused = {
-        let s = state.borrow();
-        s.player.toggle_pause();
-        s.player.paused()
-    };
-    flash(
-        state,
-        if paused {
-            "media-playback-pause-symbolic"
-        } else {
-            "media-playback-start-symbolic"
-        },
-    );
-    paused
+    let s = state.borrow();
+    s.player.toggle_pause();
+    s.player.paused()
 }
 
 /// URL'yi dosyaya indirir. İlerleme callback'i + iptal bayrağı ile.
@@ -682,7 +677,7 @@ fn start_download(
             Ok(Ok(bytes)) => {
                 toast_in(
                     &toast_c,
-                    &format!("✓ İndirildi ({:.1} MB): {fname}", bytes as f64 / 1048576.0),
+                    &format!("İndirildi ({:.1} MB): {fname}", bytes as f64 / 1048576.0),
                     5,
                 );
                 win_c.close();
@@ -725,14 +720,6 @@ fn show_video_info(parent: &adw::ApplicationWindow, heading: &str, info: &[(Stri
     d.add_response("ok", "Tamam");
     d.set_transient_for(Some(parent));
     d.present();
-}
-
-fn section_label(t: &str) -> gtk::Label {
-    let l = gtk::Label::new(Some(t));
-    l.set_xalign(0.0);
-    l.add_css_class("dim-label");
-    l.add_css_class("caption");
-    l
 }
 
 /// Şu an atlanabilir intro/outro penceresi varsa (hedef, intro_mu) döner.
@@ -826,8 +813,8 @@ fn rebuild_ctx_menu(
                     s.ed_seek_done = true;
                 }
                 s.player.seek_abs(t);
-                s.player.show_text("⏩ Atlandı", 2500);
-                toast_in(&toast_c, "⏩ Atlandı", 2);
+                s.player.show_text("Atlandı", 2500);
+                toast_in(&toast_c, "Atlandı", 2);
             }
         });
     }
@@ -891,8 +878,8 @@ fn rebuild_ctx_menu(
                             Ok(())
                         })();
                         match clip {
-                            Ok(()) => "✓ Kaydedildi + panoya kopyalandı".to_string(),
-                            Err(e) => format!("✓ Dosyaya kaydedildi (pano: {e})"),
+                            Ok(()) => "Kaydedildi + panoya kopyalandı".to_string(),
+                            Err(e) => format!("Dosyaya kaydedildi (pano: {e})"),
                         }
                     }
                     Err(e) => format!("Ekran görüntüsü hatası: {e}"),
@@ -939,62 +926,98 @@ fn fmt_bytes(b: u64) -> String {
     }
 }
 
-/// Kaynak/kalite seçici popover içeriği. Boyutlar worker ile dolar.
-/// Birleşik Ayarlar menüsü (Kalite & Kaynak, Hız, Ses & Altyazı, Focus Mod, Otomatik Bölüm).
-fn rebuild_settings_pop(
+/// Kalite/kaynak seçici: SADECE mevcut kaynak listesi. Başka bir ayar yok.
+/// Açılırken içeriği tazeler (çözünürlük + boyutlar worker ile dolmuş olur).
+fn rebuild_quality_pop(
     pop: &gtk::Popover,
+    box_: &gtk::Box,
     state: &Rc<RefCell<PlayerState>>,
     client: &Arc<Client>,
     toast: &adw::ToastOverlay,
     status: &gtk::Label,
     src_lbl: &gtk::Label,
 ) {
-    let scroll = gtk::ScrolledWindow::new();
-    scroll.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroll.set_max_content_height(460);
-    scroll.set_min_content_width(300);
-    scroll.set_propagate_natural_height(true);
+    let mut cur = box_.first_child();
+    while let Some(child) = cur {
+        let next = child.next_sibling();
+        box_.remove(&child);
+        cur = next;
+    }
 
-    let v = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    v.set_margin_top(8);
-    v.set_margin_bottom(8);
-    v.set_margin_start(10);
-    v.set_margin_end(10);
-
-    // 1. Kalite & Kaynak
-    v.append(&section_label("Kalite & Kaynak"));
-    let res_text = match state.borrow().player.video_height() {
-        Some(h) if h > 0 => format!("📺 Oynatılan Çözünürlük: {h}p"),
-        _ => "📺 Çözünürlük: Otomatik".to_string(),
-    };
-    let res_lbl = gtk::Label::new(Some(&res_text));
-    res_lbl.add_css_class("dim-label");
-    res_lbl.add_css_class("caption");
-    res_lbl.set_xalign(0.0);
-    v.append(&res_lbl);
-
-    let (sources, cur) = {
+    let (sources, idx) = {
         let s = state.borrow();
         (s.sources.clone(), s.index)
     };
-    let sizes = state.borrow().sizes.clone().lock().unwrap().clone();
+    let tau_qualities = state.borrow().tau_qualities.clone().lock().unwrap().clone();
+    let current_res = state
+        .borrow()
+        .player
+        .video_height()
+        .filter(|h| *h > 0)
+        .map(|h| format!("{}p", h));
+
+    // 1. Dinamik Çözünürlük Seçenekleri (1080p, 720p, 480p...)
+    if !tau_qualities.is_empty() {
+        let sec_lbl = gtk::Label::new(Some("ÇÖZÜNÜRLÜK"));
+        sec_lbl.add_css_class("dim-label");
+        sec_lbl.add_css_class("caption");
+        sec_lbl.set_xalign(0.0);
+        sec_lbl.set_margin_start(8);
+        sec_lbl.set_margin_bottom(4);
+        box_.append(&sec_lbl);
+
+        for (label, url) in &tau_qualities {
+            let is_cur = current_res.as_ref() == Some(label);
+            let b = crate::ui::components::check_button(label, is_cur);
+            b.add_css_class("flat");
+            let st2 = state.clone();
+            let pop2 = pop.clone();
+            let target_url = url.clone();
+            let status2 = status.clone();
+            b.connect_clicked(move |_| {
+                pop2.popdown();
+                if let Ok(s) = st2.try_borrow() {
+                    let pos = s.player.pos();
+                    if let Ok(()) = s.player.load_url(&target_url) {
+                        if pos > 0.0 {
+                            s.player.seek_abs(pos);
+                        }
+                    } else {
+                        status2.set_text("Kalite değiştirilemedi");
+                    }
+                }
+            });
+            box_.append(&b);
+        }
+
+        ctx_sep(box_);
+    }
+
+    // 2. Yedek / Alternatif Sunucular
+    let sec_lbl2 = gtk::Label::new(Some("ALTERNATİF SUNUCULAR"));
+    sec_lbl2.add_css_class("dim-label");
+    sec_lbl2.add_css_class("caption");
+    sec_lbl2.set_xalign(0.0);
+    sec_lbl2.set_margin_start(8);
+    sec_lbl2.set_margin_bottom(4);
+    box_.append(&sec_lbl2);
+
     for (i, src) in sources.iter().enumerate() {
         let host = api::Client::source_host_hint(src.hint_url());
-        let host = if host.is_empty() { "Kaynak" } else { host };
-        let size_txt = match sizes.get(i).copied().flatten() {
-            Some(b) if b > 0 => format!(" · {}", fmt_bytes(b)),
-            _ => match src {
-                Source::Direct(_) => String::new(),
-                Source::Embed(_) => " · yedek".to_string(),
-            },
+        let host_name = match host {
+            "tau-video" => "Ana Sunucu",
+            "sibnet.ru" => "Sibnet",
+            "dood" => "DoodStream",
+            "vudeo" => "Vudeo",
+            "streamtape" => "Streamtape",
+            "streamsb" => "StreamSB",
+            "gdrive" => "Google Drive",
+            _ => "Alternatif",
         };
-        let mark = if i == cur { "✓ " } else { "   " };
         let rec = if i == 0 { " (Önerilen)" } else { "" };
-        let b = gtk::Button::with_label(&format!("{mark}Kaynak {} · {host}{rec}{size_txt}", i + 1));
+        let label_text = format!("{host_name}{rec}");
+        let b = crate::ui::components::check_button(&label_text, i == idx);
         b.add_css_class("flat");
-        if let Some(lbl) = b.child().and_downcast::<gtk::Label>() {
-            lbl.set_xalign(0.0);
-        }
         let st2 = state.clone();
         let client2 = client.clone();
         let toast2 = toast.clone();
@@ -1005,208 +1028,10 @@ fn rebuild_settings_pop(
             pop2.popdown();
             load_source_at(&st2, &client2, &toast2, &status2, &src2, i);
         });
-        v.append(&b);
+        box_.append(&b);
     }
-
-    // 2. Oynatma Hızı
-    v.append(&section_label("Oynatma Hızı"));
-    let speed_box = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let cur_speed = state.borrow().player.speed();
-    for (lbl, val) in [
-        ("0.5×", 0.5),
-        ("0.75×", 0.75),
-        ("1×", 1.0),
-        ("1.25×", 1.25),
-        ("1.5×", 1.5),
-        ("2×", 2.0),
-    ] {
-        let b = gtk::Button::with_label(lbl);
-        b.add_css_class("flat");
-        b.set_hexpand(true);
-        if (cur_speed - val).abs() < 0.05 {
-            b.add_css_class("suggested-action");
-        }
-        let st2 = state.clone();
-        let pop2 = pop.clone();
-        let cl2 = client.clone();
-        let to2 = toast.clone();
-        let sta2 = status.clone();
-        let sr2 = src_lbl.clone();
-        b.connect_clicked(move |_| {
-            if let Ok(s) = st2.try_borrow() {
-                s.player.set_speed(val);
-            }
-            rebuild_settings_pop(&pop2, &st2, &cl2, &to2, &sta2, &sr2);
-        });
-        speed_box.append(&b);
-    }
-    v.append(&speed_box);
-
-    // 3. Ses & Altyazı
-    let tracks = state.borrow().player.tracks();
-    let audios: Vec<_> = tracks.iter().filter(|t| t.kind == "audio").collect();
-    let subs: Vec<_> = tracks.iter().filter(|t| t.kind == "sub").collect();
-
-    if !audios.is_empty() {
-        v.append(&section_label("Ses Parçası"));
-        for t in audios {
-            let id = t.id;
-            let mark = if t.selected { "✓ " } else { "   " };
-            let b = gtk::Button::with_label(&format!("{mark}{}", t.label()));
-            b.add_css_class("flat");
-            if let Some(lbl) = b.child().and_downcast::<gtk::Label>() {
-                lbl.set_xalign(0.0);
-            }
-            let st2 = state.clone();
-            let pop2 = pop.clone();
-            let cl2 = client.clone();
-            let to2 = toast.clone();
-            let sta2 = status.clone();
-            let sr2 = src_lbl.clone();
-            b.connect_clicked(move |_| {
-                if let Ok(s) = st2.try_borrow() {
-                    s.player.set_audio(id);
-                }
-                rebuild_settings_pop(&pop2, &st2, &cl2, &to2, &sta2, &sr2);
-            });
-            v.append(&b);
-        }
-    }
-
-    if !subs.is_empty() {
-        v.append(&section_label("Altyazı"));
-        let any_sub = subs.iter().any(|t| t.selected);
-        let off_mark = if !any_sub { "✓ " } else { "   " };
-        let off_b = gtk::Button::with_label(&format!("{off_mark}Kapalı"));
-        off_b.add_css_class("flat");
-        if let Some(lbl) = off_b.child().and_downcast::<gtk::Label>() {
-            lbl.set_xalign(0.0);
-        }
-        let st2 = state.clone();
-        let pop2 = pop.clone();
-        let cl2 = client.clone();
-        let to2 = toast.clone();
-        let sta2 = status.clone();
-        let sr2 = src_lbl.clone();
-        off_b.connect_clicked(move |_| {
-            if let Ok(s) = st2.try_borrow() {
-                s.player.set_sub(None);
-            }
-            rebuild_settings_pop(&pop2, &st2, &cl2, &to2, &sta2, &sr2);
-        });
-        v.append(&off_b);
-
-        for t in subs {
-            let id = t.id;
-            let mark = if t.selected { "✓ " } else { "   " };
-            let b = gtk::Button::with_label(&format!("{mark}{}", t.label()));
-            b.add_css_class("flat");
-            if let Some(lbl) = b.child().and_downcast::<gtk::Label>() {
-                lbl.set_xalign(0.0);
-            }
-            let st2 = state.clone();
-            let pop2 = pop.clone();
-            let cl2 = client.clone();
-            let to2 = toast.clone();
-            let sta2 = status.clone();
-            let sr2 = src_lbl.clone();
-            b.connect_clicked(move |_| {
-                if let Ok(s) = st2.try_borrow() {
-                    s.player.set_sub(Some(id));
-                }
-                rebuild_settings_pop(&pop2, &st2, &cl2, &to2, &sta2, &sr2);
-            });
-            v.append(&b);
-        }
-    }
-
-    // 4. Focus Mod & Otomatik Bölüm
-    v.append(&section_label("Oynatma Seçenekleri"));
-    let (cur_focus, cur_autonext) = {
-        let s = state.borrow();
-        (s.focus_mode, s.auto_next_episode)
-    };
-
-    let focus_mark = if cur_focus { "✓ " } else { "   " };
-    let focus_btn = gtk::Button::with_label(&format!("{focus_mark}Focus Mod (İntro/Outro Atla & Oto Bölüm)"));
-    focus_btn.add_css_class("flat");
-    if cur_focus {
-        focus_btn.add_css_class("suggested-action");
-    }
-    if let Some(lbl) = focus_btn.child().and_downcast::<gtk::Label>() {
-        lbl.set_xalign(0.0);
-    }
-    focus_btn.set_tooltip_text(Some("İntro ve outro'ları otomatik atlar, bölüm bitince sonrakine geçer"));
-    let st_f = state.clone();
-    let pop_f = pop.clone();
-    let cl_f = client.clone();
-    let to_f = toast.clone();
-    let sta_f = status.clone();
-    let sr_f = src_lbl.clone();
-    focus_btn.connect_clicked(move |_| {
-        let new_val = if let Ok(mut s) = st_f.try_borrow_mut() {
-            s.focus_mode = !s.focus_mode;
-            let mut set = cl_f.load_settings();
-            set.focus_mode = s.focus_mode;
-            cl_f.save_settings(&set);
-            s.focus_mode
-        } else {
-            false
-        };
-        let t = adw::Toast::new(if new_val { "⚡ Focus Mod Açık: İntro/outro otomatik atlanacak" } else { "Focus Mod Kapalı" });
-        t.set_timeout(2);
-        to_f.add_toast(t);
-        rebuild_settings_pop(&pop_f, &st_f, &cl_f, &to_f, &sta_f, &sr_f);
-    });
-    v.append(&focus_btn);
-
-    let auto_mark = if cur_autonext { "✓ " } else { "   " };
-    let auto_btn = gtk::Button::with_label(&format!("{auto_mark}Otomatik Bölüm Atlama"));
-    auto_btn.add_css_class("flat");
-    if cur_autonext {
-        auto_btn.add_css_class("suggested-action");
-    }
-    if let Some(lbl) = auto_btn.child().and_downcast::<gtk::Label>() {
-        lbl.set_xalign(0.0);
-    }
-    auto_btn.set_tooltip_text(Some("Bölüm bitince bir sonraki bölüme otomatik geçer"));
-    let st_a = state.clone();
-    let pop_a = pop.clone();
-    let cl_a = client.clone();
-    let to_a = toast.clone();
-    let sta_a = status.clone();
-    let sr_a = src_lbl.clone();
-    auto_btn.connect_clicked(move |_| {
-        let new_val = if let Ok(mut s) = st_a.try_borrow_mut() {
-            s.auto_next_episode = !s.auto_next_episode;
-            let mut set = cl_a.load_settings();
-            set.auto_next_episode = s.auto_next_episode;
-            cl_a.save_settings(&set);
-            s.auto_next_episode
-        } else {
-            false
-        };
-        let t = adw::Toast::new(if new_val { "Otomatik Bölüm Atlama Açık" } else { "Otomatik Bölüm Atlama Kapalı" });
-        t.set_timeout(2);
-        to_a.add_toast(t);
-        rebuild_settings_pop(&pop_a, &st_a, &cl_a, &to_a, &sta_a, &sr_a);
-    });
-    v.append(&auto_btn);
-
-    scroll.set_child(Some(&v));
-    pop.set_child(Some(&scroll));
 }
 
-/// İkon temasında var olan ilk adı seçer (eksik temalarda kırık ikon çıkmaz).
-fn pick_icon(display: &gtk::gdk::Display, candidates: &[&str]) -> String {
-    let theme = gtk::IconTheme::for_display(display);
-    for c in candidates {
-        if theme.has_icon(c) {
-            return c.to_string();
-        }
-    }
-    candidates.last().unwrap_or(&"emblem-system-symbolic").to_string()
-}
 
 fn vol_icon(volume: f64, muted: bool) -> &'static str {    if muted || volume <= 0.0 {
         "audio-volume-muted-symbolic"
@@ -1231,14 +1056,31 @@ pub fn build_embedded_player(
     progress_bars: &Rc<RefCell<HashMap<String, (gtk::ProgressBar, gtk::Label)>>>,
     req: EmbedRequest,
 ) -> Option<EmbeddedPlayer> {
-    let media_title = format!(
-        "{} | S{:02}E{:02}",
-        req.title.name, req.ep.season, req.ep.episode
-    );
+    let ep_num_str = if req.ep.episode > 0 {
+        format!("Bölüm {}", req.ep.episode)
+    } else {
+        req.ep.name.clone()
+    };
+    let media_title = format!("{} — {}", req.title.name, ep_num_str);
     eprintln!("[EMBED] gömülü oynatıcı açılıyor: {media_title}");
 
-    let mut sources: Vec<Source> = req.candidates.iter().cloned().map(Source::Direct).collect();
-    sources.extend(req.fallback_embeds.iter().cloned().map(Source::Embed));
+    let mut sources: Vec<Source> = Vec::with_capacity(req.candidates.len() + req.fallback_embeds.len());
+    // Her kaynakla aynı sırada kalacak gerçek çözünürlük etiketi (API'den).
+    let mut source_quality: Vec<Option<String>> = Vec::with_capacity(sources.capacity());
+    // Çözünürlük merdivenini çözmek için her kaynağın ALTINDAKİ embed adresi.
+    let mut res_embeds: Vec<Option<String>> = Vec::with_capacity(sources.capacity());
+    for (i, c) in req.candidates.iter().enumerate() {
+        sources.push(Source::Direct(c.clone()));
+        // Doğrudan mp4, fast_embeds[i]'deki embed adresinden çözüldü → etiket ona ait.
+        let emb = req.fast_embeds.get(i).cloned();
+        source_quality.push(emb.as_ref().and_then(|e| req.quality_map.get(e)).cloned());
+        res_embeds.push(emb);
+    }
+    for e in req.fallback_embeds.iter() {
+        sources.push(Source::Embed(e.clone()));
+        source_quality.push(req.quality_map.get(e).cloned());
+        res_embeds.push(Some(e.clone()));
+    }
     if sources.is_empty() {
         eprintln!("[EMBED] oynatılacak kaynak yok");
         return None;
@@ -1265,51 +1107,124 @@ pub fn build_embedded_player(
     {
         let css = gtk::CssProvider::new();
         css.load_from_string(
-            ".embed-scrim { background: linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.45) 60%, rgba(0,0,0,0.0)); } \
-             .embed-controls button { min-width: 30px; min-height: 30px; } \
-             .embed-controls scale { padding: 0 2px; } \
-             .embed-controls scale trough { min-height: 6px; border-radius: 3px; } \
-             .embed-controls scale highlight { min-height: 6px; border-radius: 3px; } \
-             .embed-controls scale slider { opacity: 0; } \
-             .embed-controls scale:hover slider { opacity: 1; } \
-             .embed-controls scale.seek-hot trough { min-height: 8px; border-radius: 4px; } \
-             .embed-controls scale.seek-hot highlight { min-height: 8px; border-radius: 4px; } \
-             .embed-controls scale.seek-hot slider { opacity: 1; min-width: 18px; min-height: 18px; } \
-             scale.vol-scale slider, \
-             scale.vol-scale > trough > slider, \
-             .vol-scale slider, \
-             .vol-scale > trough > slider, \
-             .vol-pop scale slider, \
-             .vol-pop scale > trough > slider { \
-                 opacity: 1; \
-                 min-width: 16px; \
-                 min-height: 16px; \
-                 border-radius: 9999px; \
-                 background-color: #ffffff; \
-                 background: #ffffff; \
-                 border: 1px solid rgba(0, 0, 0, 0.3); \
-                 box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); \
-                 margin: -5px 0; \
+            ".player-shade { \
+                 background: linear-gradient(to bottom, \
+                     rgba(0,0,0,0.5) 0%, rgba(0,0,0,0.08) 18%, \
+                     transparent 30%, transparent 70%, \
+                     rgba(0,0,0,0.08) 82%, rgba(0,0,0,0.6) 100%); \
              } \
-             .vol-scale trough, .vol-pop scale trough { min-height: 6px; border-radius: 3px; } \
-             .vol-scale highlight, .vol-pop scale highlight { min-height: 6px; border-radius: 3px; } \
-             .seek-prev { background: rgba(10,10,14,0.88); border-radius: 10px; padding: 6px; } \
-             .ep-current { border: 2px solid @accent_color; border-radius: 10px; } \
-             .embed-status { font-size: 0.78em; } \
-             .embed-flash { background: rgba(10,10,14,0.62); border-radius: 999px; padding: 18px; } \
-             .embed-back { background: transparent; color: white; } \
-             .embed-back:hover { background: rgba(255,255,255,0.14); } \
-             .embed-title { color: white; background: rgba(0,0,0,0.38); border-radius: 10px; padding: 2px 14px; } \
-             .embed-topbar { background: linear-gradient(to bottom, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.0) 100%); border-radius: 0; } \
-              .embed-playerbar { background: transparent; border: none; box-shadow: none; padding: 8px 10px 6px 10px; } \
-              .embed-edge { background: rgba(255,255,255,0.38); border-radius: 999px; } \
-              .ep-panel { background: rgba(10,10,14,0.90); border-radius: 14px 0 0 14px; padding: 10px; } \
-              .ep-panel-title { font-weight: 800; letter-spacing: 0.08em; }",
+             .player-text { \
+                 color: white; \
+                 text-shadow: 0 1px 3px rgba(0,0,0,0.8); \
+             } \
+            .player-play-btn { \n                -gtk-icon-size: 32px; \n                color: white; \n                min-width: 56px; \n                min-height: 56px; \n                padding: 0; \n                border: none; \n                box-shadow: none; \n                background: transparent; \n                background-color: transparent; \n                transition: transform 120ms ease, opacity 120ms ease; \n            } \n            .player-play-btn:hover { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(1.12); \n                opacity: 0.85; \n            } \n            .player-play-btn:active { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(0.95); \n            } \n            .player-play-btn image { color: white; -gtk-icon-size: 32px; } \n            .player-center-btn { \n                -gtk-icon-size: 24px; \n                color: white; \n                min-width: 44px; \n                min-height: 44px; \n                padding: 0; \n                border: none; \n                box-shadow: none; \n                background: transparent; \n                background-color: transparent; \n                transition: transform 120ms ease, opacity 120ms ease; \n            } \n            .player-center-btn:hover { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(1.12); \n                opacity: 0.85; \n            } \n            .player-center-btn:active { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(0.95); \n            } \n            .player-center-btn image { color: white; -gtk-icon-size: 24px; } \n            .player-shade scale, .embed-controls scale { padding: 0; } \
+            .player-shade scale trough, .embed-controls scale trough { \
+                background: rgba(255, 255, 255, 0.3); \
+                min-height: 4px; \
+                border-radius: 2px; \
+                margin: 0; \
+                padding: 0; \
+            } \
+            .player-shade scale highlight, .embed-controls scale highlight { \
+                background: white; \
+                min-height: 4px; \
+                border-radius: 2px; \
+            } \
+            .player-shade scale fill, .embed-controls scale fill { \
+                background: rgba(255, 255, 255, 0.5); \
+                min-height: 4px; \
+            } \
+            .player-shade scale slider, .embed-controls scale slider { \
+                background: white; \
+                background-color: white; \
+                border: none; \
+                min-width: 14px; \
+                min-height: 14px; \
+                border-radius: 7px; \
+                margin: -5px 0; \
+                opacity: 1; \
+                box-shadow: 0 1px 3px rgba(0,0,0,0.8); \
+            } \
+            scale.vol-scale, .vol-scale { padding: 0; } \
+            scale.vol-scale trough, .vol-scale trough { \
+                min-height: 4px; \
+                border-radius: 2px; \
+                background: rgba(255,255,255,0.3); \
+            } \
+            scale.vol-scale highlight, .vol-scale highlight { \
+                min-height: 4px; \
+                border-radius: 2px; \
+                background: white; \
+            } \
+            scale.vol-scale slider, .vol-scale slider { \
+                background: white; \
+                min-width: 14px; \
+                min-height: 14px; \
+                border-radius: 7px; \
+                border: none; \
+                margin: -5px 0; \
+                opacity: 1; \
+                box-shadow: 0 1px 3px rgba(0,0,0,0.8); \
+            } \
+            .pill-dropdown, \n            .pill-dropdown button, \n            menubutton.pill-dropdown > button, \n            menubutton.pill-dropdown button { \n                color: white; \n                background: transparent; \n                background-color: transparent; \n                background-image: none; \n                border-radius: 6px; \n                border: none; \n                box-shadow: none; \n                outline: none; \n                padding: 2px 6px; \n                transition: opacity 120ms ease; \n            } \n            .pill-dropdown:hover, \n            .pill-dropdown button:hover, \n            menubutton.pill-dropdown > button:hover { \n                background: transparent; \n                background-color: transparent; \n                background-image: none; \n                opacity: 0.8; \n            } \n            menubutton.pill-dropdown:active > button, \n            menubutton.pill-dropdown:checked > button, \n            menubutton.pill-dropdown > button:checked { \n                background: transparent; \n                background-color: transparent; \n                background-image: none; \n                opacity: 0.9; \n            } \n            .pill-dropdown label, \
+            .pill-dropdown button label, \
+            menubutton.pill-dropdown label { \
+                color: white; \
+                font-weight: 500; \
+                text-shadow: 0 1px 3px rgba(0,0,0,0.8); \
+            } \
+            .pill-dropdown image, \
+            .pill-dropdown button image, \
+            menubutton.pill-dropdown image { \
+                color: white; \
+            } \
+            button.player-vol-btn, \
+            .player-vol-btn { \
+                background: transparent; \
+                background-color: transparent; \
+                background-image: none; \
+                border: none; \
+                box-shadow: none; \
+                outline: none; \
+                color: white; \
+                padding: 0; \
+                border-radius: 16px; \
+                min-width: 32px; \
+                min-height: 32px; \
+                transition: background-color 200ms ease; \
+            } \
+            button.player-vol-btn:hover, \n            .player-vol-btn:hover { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(1.12); \n                opacity: 0.85; \n            } \n            button.player-vol-btn:active, \n            .player-vol-btn:active { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(0.95); \n            } \n            button.player-vol-btn image, \
+            .player-vol-btn image { \
+                color: white; \
+                -gtk-icon-size: 20px; \
+            } \
+            .top-nav-btn { \
+                color: white; \
+                min-width: 36px; \
+                min-height: 36px; \
+                border-radius: 18px; \
+                background: rgba(0, 0, 0, 0.6); \
+                border: none; \
+                box-shadow: none; \
+                padding: 0; \
+            } \
+            .top-nav-btn:hover { background: rgba(0, 0, 0, 0.8); } \
+            .top-nav-btn image { color: white; -gtk-icon-size: 18px; } \
+            .embed-time { font-variant-numeric: tabular-nums; color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.8); } \
+            .embed-bot-title { font-weight: 600; color: white; text-shadow: 0 1px 3px rgba(0,0,0,0.8); } \
+            .ep-current { border: 2px solid @accent_color; border-radius: 10px; } \
+            .embed-status { font-size: 0.78em; } \
+            .info-capsule { background-color: rgba(0,0,0,0.7); color: white; border-radius: 9999px; \
+                padding: 4px 14px; font-size: 0.82em; } \
+            .embed-topbar { background: transparent; border-radius: 0; } \
+            .embed-edge { background: rgba(255,255,255,0.38); border-radius: 999px; } \
+            .ep-panel { background: rgba(10,10,14,0.90); border-radius: 14px 0 0 14px; padding: 10px; } \
+            .ep-panel-title { font-weight: 800; letter-spacing: 0.08em; }",
         );
         gtk::style_context_add_provider_for_display(
             &vbox.display(),
             &css,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+            gtk::STYLE_PROVIDER_PRIORITY_USER,
         );
     }
 
@@ -1317,6 +1232,23 @@ pub fn build_embedded_player(
     stage.set_hexpand(true);
     stage.set_vexpand(true);
     vbox.append(&stage);
+
+    // Video üstüne binen Kitsune yumuşak gölgeleme katmanı (GLArea şeffaflığı engellemesin diye bağımsız katman)
+    let shade_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    shade_box.add_css_class("player-shade");
+    shade_box.set_hexpand(true);
+    shade_box.set_vexpand(true);
+    shade_box.set_can_target(false);
+    let shade_rev = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::Crossfade)
+        .transition_duration(220)
+        .child(&shade_box)
+        .build();
+    shade_rev.set_reveal_child(true);
+    shade_rev.set_hexpand(true);
+    shade_rev.set_vexpand(true);
+    shade_rev.set_can_target(false);
+    stage.add_overlay(&shade_rev);
 
     let gl_area = gtk::GLArea::builder().hexpand(true).vexpand(true).build();
     gl_area.set_required_version(3, 0);
@@ -1326,79 +1258,145 @@ pub fn build_embedded_player(
     stage.set_child(Some(&gl_area));
 
     // alt kontrol barı (revealer içinde, fare boşta kalınca gizlenir)
-    let controls = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    controls.add_css_class("embed-scrim");
+    let controls = gtk::Box::new(gtk::Orientation::Vertical, 6);
     controls.add_css_class("embed-controls");
     controls.set_valign(gtk::Align::End);
+    controls.set_margin_start(16);
+    controls.set_margin_end(16);
+    controls.set_margin_bottom(12);
 
-    let bar = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    bar.set_margin_top(20);
-    bar.set_margin_bottom(2);
-    bar.set_margin_start(8);
-    bar.set_margin_end(8);
-    let play_btn = gtk::Button::from_icon_name("media-playback-pause-symbolic");
-    play_btn.set_tooltip_text(Some("Oynat / Duraklat (Boşluk / tıkla)"));
-    for b in [&play_btn] {
-        b.add_css_class("flat");
-        b.add_css_class("circular");
-    }
+    // --- orta kontroller: Kitsune mimarisi [−10][oynat/duraklat][+10] ---
+    let play_btn = gtk::Button::from_icon_name("net.armatik.Kitsune.media-playback-start-symbolic");
+    play_btn.set_tooltip_text(Some("Oynat / Duraklat (Boşluk / videoya tıkla)"));
+    play_btn.add_css_class("flat");
+    play_btn.add_css_class("player-play-btn");
+
+    let back10_btn = gtk::Button::from_icon_name("net.armatik.Kitsune.seek-backward-10-symbolic");
+    back10_btn.set_tooltip_text(Some("10 sn geri (←)"));
+    back10_btn.add_css_class("flat");
+    back10_btn.add_css_class("player-center-btn");
+
+    let fwd10_btn = gtk::Button::from_icon_name("net.armatik.Kitsune.seek-forward-10-symbolic");
+    fwd10_btn.set_tooltip_text(Some("10 sn ileri (→)"));
+    fwd10_btn.add_css_class("flat");
+    fwd10_btn.add_css_class("player-center-btn");
+
     let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1000.0, 1.0);
+    seek.add_css_class("pc-seek");
     seek.set_hexpand(true);
     seek.set_draw_value(false);
     seek.set_tooltip_text(Some("İlerleme çubuğu — sürükle"));
-    let time_lbl = gtk::Label::new(Some("--:-- / --:--"));
+    let cur_lbl = gtk::Label::new(Some("--:--"));
+    let dur_lbl = gtk::Label::new(Some("--:--"));
+    cur_lbl.add_css_class("embed-time");
+    dur_lbl.add_css_class("embed-time");
 
-    // --- ses: MenuButton + Popover (tıklayınca YUKARI doğru açılır) ---
-    let vol_btn = gtk::MenuButton::builder()
-        .icon_name(vol_icon(start_volume, start_muted))
-        .tooltip_text("Ses seviyesi (M)")
-        .build();
+    // --- ses: SAĞDA, doğrudan tıklayarak/sürükleyerek ayarlanır (popover yok) ---
+    let vol_btn = gtk::Button::from_icon_name(vol_icon(start_volume, start_muted));
+    vol_btn.set_tooltip_text(Some("Sesi aç/kapat (M)"));
     vol_btn.add_css_class("flat");
     vol_btn.add_css_class("circular");
-    let vol_pop = gtk::Popover::builder()
-        .position(gtk::PositionType::Top)
-        .build();
-    vol_pop.add_css_class("vol-pop");
+    vol_btn.add_css_class("player-text");
+    vol_btn.add_css_class("player-vol-btn");
     let vol_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
     vol_scale.add_css_class("vol-scale");
     vol_scale.set_value(start_volume);
     vol_scale.set_draw_value(false);
-    vol_scale.set_size_request(130, 36);
-    vol_scale.set_margin_top(8);
-    vol_scale.set_margin_bottom(8);
-    vol_scale.set_margin_start(12);
-    vol_scale.set_margin_end(12);
-    vol_pop.set_child(Some(&vol_scale));
-    vol_btn.set_popover(Some(&vol_pop));
+    vol_scale.set_size_request(70, -1);
 
-    let fs_btn = gtk::Button::from_icon_name("view-fullscreen-symbolic");
-    fs_btn.set_tooltip_text(Some("Tam ekran (F / çift tık)"));
-    fs_btn.add_css_class("flat");
-    fs_btn.add_css_class("circular");
-
-    let settings_btn = gtk::MenuButton::builder()
-        .icon_name("emblem-system-symbolic")
-        .tooltip_text("Ayarlar (Kalite, Hız, Altyazı, Focus)")
-        .build();
-    settings_btn.add_css_class("flat");
-    settings_btn.add_css_class("circular");
-    let settings_pop = gtk::Popover::new();
-    settings_btn.set_popover(Some(&settings_pop));
     let src_lbl = gtk::Label::new(None);
 
-    bar.append(&play_btn);
-    bar.append(&vol_btn);
-    bar.append(&seek);
-    let rightbox = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    rightbox.append(&time_lbl);
-    rightbox.append(&settings_btn);
-    rightbox.append(&fs_btn);
-    bar.append(&rightbox);
-    controls.append(&bar);
+    // --- oynatma hızı: küçük açılır menü ---
+    let speed_btn = gtk::MenuButton::builder()
+        .label("1.0x ▾")
+        .tooltip_text("Oynatma hızı")
+        .build();
+    speed_btn.add_css_class("flat");
+    speed_btn.add_css_class("pill-dropdown");
+    let speed_pop = gtk::Popover::builder()
+        .position(gtk::PositionType::Top)
+        .build();
+    speed_btn.set_popover(Some(&speed_pop));
+    let speed_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    speed_box.set_margin_top(6);
+    speed_box.set_margin_bottom(6);
+    speed_pop.set_child(Some(&speed_box));
 
-    let status = gtk::Label::new(Some("yükleniyor…"));
-    // Sol alt durum metni kaldırıldı (bilgiler toast ile veriliyor).
+    // --- kalite: SADECE kaynak/çözünürlük listesi, başka bir şey yok ---
+    let quality_btn = gtk::MenuButton::builder()
+        .label("1080p ▾")
+        .tooltip_text("Kalite / kaynak")
+        .build();
+    quality_btn.add_css_class("flat");
+    quality_btn.add_css_class("pill-dropdown");
+    let quality_pop = gtk::Popover::builder()
+        .position(gtk::PositionType::Top)
+        .build();
+    quality_btn.set_popover(Some(&quality_pop));
+    let quality_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    quality_box.set_margin_top(6);
+    quality_box.set_margin_bottom(6);
+    quality_pop.set_child(Some(&quality_box));
+
+    // --- alt kontrol kümesi (scrim içinde, fare boşta kalınca gizlenir) ---
+    let bot_title = gtk::Label::new(Some(&media_title));
+    bot_title.add_css_class("embed-bot-title");
+    bot_title.add_css_class("title-4");
+    bot_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    bot_title.set_xalign(0.0);
+    bot_title.set_hexpand(true);
+
+    // Seek üstünde ortada beliren hata/bilgi kapsülü (yalnızca gerektiğinde).
+    let status = gtk::Label::new(None);
+    status.add_css_class("info-capsule");
+    status.set_halign(gtk::Align::Center);
+    status.set_valign(gtk::Align::Center);
     status.set_visible(false);
+
+    // Alt panel — 3 sıra (üst kısım · seek · alt kısım).
+    // Üst kısım: başlık (sol) · hız + kalite pill'leri (sağ).
+    let top_part = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    top_part.append(&bot_title);
+    top_part.append(&speed_btn);
+    top_part.append(&quality_btn);
+
+    // Orta kısım: tam genişlik ince seekbar; ortada beliren bilgi kapsülü.
+    let seek_row = gtk::Overlay::new();
+    seek_row.set_child(Some(&seek));
+    seek_row.add_overlay(&status);
+
+    // Alt kısım: geçen süre (sol) … ses ikonu + ses slider + toplam süre (sağ).
+    let bottom_part = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    bottom_part.append(&cur_lbl);
+    let time_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    time_spacer.set_hexpand(true);
+    bottom_part.append(&time_spacer);
+    bottom_part.append(&vol_btn);
+    bottom_part.append(&vol_scale);
+    bottom_part.append(&dur_lbl);
+
+    controls.append(&top_part);
+    controls.append(&seek_row);
+    controls.append(&bottom_part);
+
+    // ORTA taşıma kümesi: [−10][oynat/duraklat][+10] — ekranın tam ortasında.
+    let center_box = gtk::Box::new(gtk::Orientation::Horizontal, 24);
+    center_box.set_halign(gtk::Align::Center);
+    center_box.set_valign(gtk::Align::Center);
+    center_box.append(&back10_btn);
+    center_box.append(&play_btn);
+    center_box.append(&fwd10_btn);
+    let center_rev = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::Crossfade)
+        .transition_duration(220)
+        .child(&center_box)
+        .build();
+    center_rev.set_reveal_child(true);
+    center_rev.set_halign(gtk::Align::Center);
+    center_rev.set_valign(gtk::Align::Center);
+
+    // Z-sırası: orta küme → alt bar.
+    stage.add_overlay(&center_rev);
 
     // alt bar revealer ile sahneye gömülür (oto-gizleme için)
     let controls_revealer = gtk::Revealer::builder()
@@ -1411,26 +1409,15 @@ pub fn build_embedded_player(
     controls_revealer.set_hexpand(true);
     stage.add_overlay(&controls_revealer);
 
-    // ortada belirip kaybolan büyük oynat/duraklat ikonu
-    let flash_img = gtk::Image::builder()
-        .icon_name("media-playback-start-symbolic")
-        .pixel_size(64)
-        .build();
-    let flash_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    flash_box.add_css_class("embed-flash");
-    flash_box.append(&flash_img);
-    let flash_rev = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::Crossfade)
-        .transition_duration(180)
-        .child(&flash_box)
-        .build();
-    flash_rev.set_reveal_child(false);
-    flash_rev.set_halign(gtk::Align::Center);
-    flash_rev.set_valign(gtk::Align::Center);
-    stage.add_overlay(&flash_rev);
-
     // sağ altta beliren "İntroyu Atla" butonu
-    let skip_btn = gtk::Button::with_label("⏩ İntroyu Atla");
+    let skip_btn = gtk::Button::new();
+    let skip_lbl = gtk::Label::new(Some("İntroyu Atla"));
+    {
+        let r = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+        r.append(&gtk::Image::from_icon_name("media-skip-forward-symbolic"));
+        r.append(&skip_lbl);
+        skip_btn.set_child(Some(&r));
+    }
     skip_btn.add_css_class("suggested-action");
     skip_btn.add_css_class("pill");
     let skip_rev = gtk::Revealer::builder()
@@ -1445,15 +1432,16 @@ pub fn build_embedded_player(
     skip_rev.set_margin_bottom(110);
     stage.add_overlay(&skip_rev);
 
-    // üst yüzen bar: GERÇEK HeaderBar, şeffaf + çizgisiz, videonun üstünde.
-    // Native header player sayfasında gizlidir; bu bar onun yerini tutar
-    // ve kromla birlikte gizlenip açılır. Yerli pencere düğmeleriyle gelir.
-    let top_title = gtk::Label::new(Some(&media_title));
-    top_title.add_css_class("title-4");
-    top_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    // Üst Bar: Ekranın en üstü (valign: Start), yatay Box.
+    // margin_start: 16, margin_end: 16, margin_top: 14.
+    // Sol uç: sade geri dönüş (<), "flat", "circular".
+    // Sağ uç: tam ekran açma/kapama (⛶), "flat", "circular".
+    // Başlık, anime adı veya logo üst barda KESİNLİKLE yer almayacak.
     let top_back = gtk::Button::from_icon_name("go-previous-symbolic");
     top_back.add_css_class("flat");
     top_back.add_css_class("circular");
+    top_back.add_css_class("osd");
+    top_back.add_css_class("top-nav-btn");
     top_back.set_tooltip_text(Some("Geri"));
     {
         let cb = req.on_back.clone();
@@ -1463,26 +1451,37 @@ pub fn build_embedded_player(
             }
         });
     }
-    let player_bar = adw::HeaderBar::builder()
-        .title_widget(&top_title)
-        .show_start_title_buttons(false)
-        .show_end_title_buttons(true)
-        .build();
-    player_bar.pack_start(&top_back);
-    player_bar.add_css_class("embed-playerbar");
-    // Üst bar pencere tutamacı: düğmeler çalışır, boş alandan sürükleyince
-    // pencere taşınır (native header gizli olduğu için şart).
-    player_bar.set_hexpand(true);
+    let fs_btn = gtk::Button::from_icon_name("view-fullscreen-symbolic");
+    fs_btn.add_css_class("flat");
+    fs_btn.add_css_class("circular");
+    fs_btn.add_css_class("osd");
+    fs_btn.add_css_class("top-nav-btn");
+    fs_btn.set_tooltip_text(Some("Tam ekran (F)"));
+
+    let top_bar_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    top_bar_box.set_hexpand(true);
+    top_bar_box.set_valign(gtk::Align::Start);
+    top_bar_box.set_margin_start(16);
+    top_bar_box.set_margin_end(16);
+    top_bar_box.set_margin_top(14);
+
+    top_back.set_halign(gtk::Align::Start);
+    top_bar_box.append(&top_back);
+
+    let top_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    top_spacer.set_hexpand(true);
+    top_bar_box.append(&top_spacer);
+
+    fs_btn.set_halign(gtk::Align::End);
+    top_bar_box.append(&fs_btn);
+
     let drag_handle = gtk::WindowHandle::builder()
-        .child(&player_bar)
+        .child(&top_bar_box)
         .hexpand(true)
         .build();
     drag_handle.add_css_class("embed-topbar");
-    // Gradyan tam kanala otursun: dış boşluk yok, iç dolgu headerbar'da.
-    drag_handle.set_margin_top(0);
-    drag_handle.set_margin_start(0);
-    drag_handle.set_margin_end(0);
-    // Başlığa çift tık: büyüt / eski boyut.
+
+    // Alta taşınan başlığa çift tık: büyüt / eski boyut.
     {
         let w = main_window.clone();
         let title_click = gtk::GestureClick::new();
@@ -1495,7 +1494,7 @@ pub fn build_embedded_player(
                 }
             }
         });
-        top_title.add_controller(title_click);
+        bot_title.add_controller(title_click);
     }
     let topbar = gtk::Revealer::builder()
         .transition_type(gtk::RevealerTransitionType::SlideDown)
@@ -1679,6 +1678,7 @@ pub fn build_embedded_player(
     // Tek bölümlük içerikte (film) panel/şerit gereksiz.
     ep_strip.set_visible(req.episodes.len() > 1);
     stage.add_overlay(&ep_strip);
+
     {
         let rev_c = ep_rev.clone();
         let enter = gtk::EventControllerMotion::new();
@@ -1706,10 +1706,10 @@ pub fn build_embedded_player(
         player,
         render_ctx: None,
         sources,
+        source_quality,
         index: 0,
         load_started: Instant::now(),
         media_loaded: false,
-        playing_shown: false,
         resolving: false,
         resolve_result: Arc::new(Mutex::new(None)),
         aniskip: Arc::new(Mutex::new(AniSkipTimes::default())),
@@ -1744,13 +1744,16 @@ pub fn build_embedded_player(
         hide_my: -1.0,
         cursor_hidden: false,
         topbar: topbar.clone(),
+        shade: shade_rev.clone(),
+        center_cluster: center_rev.clone(),
+        ep_strip: ep_strip.clone(),
         chrome_hidden: false,
         we_fullscreened: false,
         click_pending: Rc::new(Cell::new(false)),
         header_motion: None,
-        flash_img: flash_img.clone(),
-        flash_rev: flash_rev.clone(),
         sizes: Arc::new(Mutex::new(vec![None; sources_len_for_sizes])),
+        source_res: Arc::new(Mutex::new(vec![None; sources_len_for_sizes])),
+        tau_qualities: Arc::new(Mutex::new(Vec::new())),
         last_report: Instant::now(),
     }));
     let _ = &req.fast_embeds;
@@ -1901,16 +1904,17 @@ pub fn build_embedded_player(
         let status_c = status.clone();
         let src_lbl_c = src_lbl.clone();
         let seek_w = seek.downgrade();
-        let lbl_w = time_lbl.downgrade();
+        let cur_w = cur_lbl.downgrade();
+        let dur_w = dur_lbl.downgrade();
+        let quality_w = quality_btn.downgrade();
         let play_w = play_btn.downgrade();
         let vol_w = vol_scale.downgrade();
         let vol_btn_w = vol_btn.downgrade();
         let rev_w = controls_revealer.downgrade();
         let skip_rev_w = skip_rev.downgrade();
-        let skip_btn_c = skip_btn.clone();
-        let settings_pop_w = settings_pop.downgrade();
-        let vol_pop_w = vol_pop.downgrade();
-        let fs_w = fs_btn.downgrade();
+        let skip_lbl_c = skip_lbl.clone();
+        let speed_pop_w = speed_pop.downgrade();
+        let quality_pop_w = quality_pop.downgrade();
         let patience = req.patience_secs.max(10);
         let tid = req.title.id;
         let aniskip_on = req.aniskip_enabled;
@@ -1933,7 +1937,6 @@ pub fn build_embedded_player(
                             s.sources[idx] = Source::Direct(url.clone());
                             s.load_started = Instant::now();
                             s.media_loaded = false;
-                            s.playing_shown = false;
                             if let Some(r) = sibnet_referer(&url) {
                                 s.player.set_http_headers(&r);
                             }
@@ -1968,20 +1971,11 @@ pub fn build_embedded_player(
             if dur > 0.0 {
                 if !s.media_loaded {
                     s.media_loaded = true;
-                    // Video hazır — oynatmaya başla
+                    // Video hazır — oynatmaya başla, bilgi kapsülünü gizle.
                     s.player.set_pause(false);
+                    status_c.set_visible(false);
                     eprintln!("[PLAYER] video hazır, oynatılıyor");
                 }
-            }
-            if s.media_loaded && !eof && !s.playing_shown {
-                s.playing_shown = true;
-                let host = api::Client::source_host_hint(s.sources[s.index].hint_url());
-                let msg = if host.is_empty() {
-                    "oynatılıyor ▶".to_string()
-                } else {
-                    format!("oynatılıyor ▶ · {host}")
-                };
-                status_c.set_text(&msg);
             }
 
             // --- AniSkip & Focus Mod ---
@@ -1992,12 +1986,12 @@ pub fn build_embedded_player(
                         s.op_seek_done = true;
                         s.op_prompted = true;
                         s.player.seek_abs(end);
-                        s.player.show_text("⏩ İntro otomatik atlandı (Focus Mod)", 3000);
-                        toast_in(&toast_c, "⏩ İntro otomatik atlandı", 3);
+                        s.player.show_text("İntro otomatik atlandı (Focus Mod)", 3000);
+                        toast_in(&toast_c, "İntro otomatik atlandı", 3);
                     } else if !s.op_prompted && pos >= (st - 1.5) && pos <= (st + 25.0) {
                         s.op_prompted = true;
-                        s.player.show_text("⏩ İntro Başladı ('s' ile atlayabilirsiniz)", 7000);
-                        toast_in(&toast_c, "⏩ İntro başladı — 's' ile atla", 4);
+                        s.player.show_text("İntro Başladı ('s' ile atlayabilirsiniz)", 7000);
+                        toast_in(&toast_c, "İntro başladı — 's' ile atla", 4);
                     }
                 }
                 if let (Some(st), Some(end)) = (snap.ed_start, snap.ed_end) {
@@ -2008,8 +2002,8 @@ pub fn build_embedded_player(
                             s.next_triggered = true;
                             let next = s.next_ep.clone().unwrap();
                             if let Some(ref play_fn) = s.play_episode {
-                                s.player.show_text("⏭️ Sonraki bölüme geçiliyor (Focus Mod)...", 3000);
-                                toast_in(&toast_c, "⏭️ Sonraki bölüme geçiliyor...", 3);
+                                s.player.show_text("Sonraki bölüme geçiliyor (Focus Mod)...", 3000);
+                                toast_in(&toast_c, "Sonraki bölüme geçiliyor...", 3);
                                 let play = play_fn.clone();
                                 glib::timeout_add_local_once(Duration::from_millis(500), move || {
                                     play(next);
@@ -2017,13 +2011,13 @@ pub fn build_embedded_player(
                             }
                         } else {
                             s.player.seek_abs(end);
-                            s.player.show_text("🏁 Outro otomatik atlandı (Focus Mod)", 3000);
-                            toast_in(&toast_c, "🏁 Outro otomatik atlandı", 3);
+                            s.player.show_text("Outro otomatik atlandı (Focus Mod)", 3000);
+                            toast_in(&toast_c, "Outro otomatik atlandı", 3);
                         }
                     } else if !s.ed_prompted && pos >= (st - 1.5) && pos <= (st + 25.0) {
                         s.ed_prompted = true;
-                        s.player.show_text("🏁 Outro Başladı ('e' ile atlayabilirsiniz)", 7000);
-                        toast_in(&toast_c, "🏁 Outro başladı — 'e' ile atla", 4);
+                        s.player.show_text("Outro Başladı ('e' ile atlayabilirsiniz)", 7000);
+                        toast_in(&toast_c, "Outro başladı — 'e' ile atla", 4);
                     }
                 }
             }
@@ -2051,15 +2045,15 @@ pub fn build_embedded_player(
                     s.next_triggered = true;
                     let next = s.next_ep.clone().unwrap();
                     if let Some(ref play_fn) = s.play_episode {
-                        s.player.show_text("⏭️ Sonraki bölüme geçiliyor...", 3000);
-                        toast_in(&toast_c, "⏭️ Sonraki bölüme geçiliyor...", 3);
+                        s.player.show_text("Sonraki bölüme geçiliyor...", 3000);
+                                toast_in(&toast_c, "Sonraki bölüme geçiliyor...", 3);
                         let play = play_fn.clone();
                         glib::timeout_add_local_once(Duration::from_millis(500), move || {
                             play(next);
                         });
                     }
                 }
-                status_c.set_text("bitti ✓");
+                status_c.set_text("bitti");
                 return glib::ControlFlow::Continue;
             }
 
@@ -2092,8 +2086,8 @@ pub fn build_embedded_player(
             // --- sinema modu: imleç 1sn, krom 2sn boşta gizlenir ---
             // (Pencerelide de tam ekranda da aynı: üst yüzen bar + alt bar.)
             {
-                let pop_open = settings_pop_w.upgrade().map(|p| p.is_visible()).unwrap_or(false)
-                    || vol_pop_w.upgrade().map(|p| p.is_visible()).unwrap_or(false);
+                let pop_open = speed_pop_w.upgrade().map(|p| p.is_visible()).unwrap_or(false)
+                    || quality_pop_w.upgrade().map(|p| p.is_visible()).unwrap_or(false);
                 if pop_open {
                     s.last_motion = Instant::now();
                 }
@@ -2110,16 +2104,19 @@ pub fn build_embedded_player(
                     }
                 }
             }
+            // --- render self-heal: mpv update callback bir kareyi kaçırırsa
+            // GLArea siyah kalabiliyor. Her tick'te bir çizim iste — mevcut
+            // kareyi yeniden çizer, maliyeti ihmal edilebilir, takılı siyahı
+            // en geç ~500ms'de toplar. ---
+            if !s.player.idle() {
+                s.gl_area.queue_render();
+            }
             // --- introyu-atla butonu ---
             if aniskip_on {
                 if let Some((_, is_op)) =
                     skip_target(&s.aniskip.lock().unwrap().clone(), pos, s.op_seek_done, s.ed_seek_done)
                 {
-                    skip_btn_c.set_label(if is_op {
-                        "⏩ İntroyu Atla"
-                    } else {
-                        "⏩ Outro'yu Atla"
-                    });
+                    skip_lbl_c.set_text(if is_op { "İntroyu Atla" } else { "Outro'yu Atla" });
                     if let Some(r) = skip_rev_w.upgrade() {
                         r.set_reveal_child(true);
                     }
@@ -2130,24 +2127,26 @@ pub fn build_embedded_player(
                 r.set_reveal_child(false);
             }
             // --- UI + progress ---
-            if let Some(l) = lbl_w.upgrade() {
-                l.set_text(&format!("{} / {}", fmt_time(pos), fmt_time(dur)));
+            if let Some(l) = cur_w.upgrade() {
+                l.set_text(&fmt_time(pos));
+            }
+            if let Some(l) = dur_w.upgrade() {
+                l.set_text(&fmt_time(dur));
+            }
+            // kalite düğmesi gerçek çözünürlüğü göstersin
+            if let Some(qb) = quality_w.upgrade() {
+                if let Some(h) = s.player.video_height() {
+                    qb.set_label(&format!("{h}p ▾"));
+                }
             }
             if !s.seeking.get() && dur > 0.0 && pos >= 1.0 {
                 seek.set_value((pos / dur * 1000.0).clamp(0.0, 1000.0));
             }
             if let Some(b) = play_w.upgrade() {
                 b.set_icon_name(if s.player.paused() {
-                    "media-playback-start-symbolic"
+                    "net.armatik.Kitsune.media-playback-start-symbolic"
                 } else {
-                    "media-playback-pause-symbolic"
-                });
-            }
-            if let Some(f) = fs_w.upgrade() {
-                f.set_icon_name(if s.main_window.is_fullscreen() {
-                    "view-restore-symbolic"
-                } else {
-                    "view-fullscreen-symbolic"
+                    "net.armatik.Kitsune.media-playback-pause-symbolic"
                 });
             }
             // ses senkronu (kullanıcı sürüklemiyorsa)
@@ -2209,21 +2208,80 @@ pub fn build_embedded_player(
             toggle_with_flash(&st_c);
         });
     }
-    // Ayarlar menüsü (Kalite + Hız + Altyazı + Focus Mod + Oto Bölüm)
     {
         let st_c = state.clone();
-        let pop_c = settings_pop.clone();
+        let rev_c = controls_revealer.clone();
+        fs_btn.connect_clicked(move |_| {
+            let on = !st_c.borrow().main_window.is_fullscreen();
+            set_fullscreen(&st_c, &rev_c, on);
+        });
+    }
+    {
+        let st_c = state.clone();
+        back10_btn.connect_clicked(move |_| {
+            st_c.borrow().player.seek_rel(-10.0);
+        });
+        let st_c = state.clone();
+        fwd10_btn.connect_clicked(move |_| {
+            st_c.borrow().player.seek_rel(10.0);
+        });
+    }
+    // Kalite menüsü: SADECE kaynak listesi. Açılırken tazeler.
+    {
+        let st_c = state.clone();
         let client_c = client.clone();
         let toast_c = toast.clone();
         let status_c = status.clone();
         let src_c = src_lbl.clone();
-        rebuild_settings_pop(&pop_c, &st_c, &client_c, &toast_c, &status_c, &src_c);
-        let pop_c2 = pop_c.clone();
-        pop_c.connect_show(move |_| {
-            rebuild_settings_pop(&pop_c2, &st_c, &client_c, &toast_c, &status_c, &src_c);
+        rebuild_quality_pop(&quality_pop, &quality_box, &st_c, &client_c, &toast_c, &status_c, &src_c);
+        let qb = quality_box.clone();
+        let qp_body = quality_pop.clone();
+        quality_pop.connect_show(move |_| {
+            rebuild_quality_pop(&qp_body, &qb, &st_c, &client_c, &toast_c, &status_c, &src_c);
         });
     }
-    // kaynak boyutları (arka planda ölç, menüde göster)
+    // Ses düğmesi: tıklayınca sustur / susturmayı kaldır ( popover yok ).
+    {
+        let st_c = state.clone();
+        let vb = vol_btn.clone();
+        vol_btn.connect_clicked(move |_| {
+            if let Ok(s) = st_c.try_borrow() {
+                let m = !s.player.muted();
+                s.player.set_mute(m);
+                vb.set_icon_name(vol_icon(s.player.volume(), m));
+            }
+        });
+    }
+    // Hız menüsü: alt bardaki sağ-sol açılır düğme.
+    {
+        let st_c = state.clone();
+        let btn_lbl = speed_btn.clone();
+        let pp2 = speed_pop.clone();
+        for (lbl, val) in [
+            ("0.5x ▾", 0.5),
+            ("0.75x ▾", 0.75),
+            ("1.0x ▾", 1.0),
+            ("1.25x ▾", 1.25),
+            ("1.5x ▾", 1.5),
+            ("1.75x ▾", 1.75),
+            ("2.0x ▾", 2.0),
+        ] {
+            let b = gtk::Button::with_label(lbl);
+            b.add_css_class("flat");
+            let st2 = st_c.clone();
+            let bl2 = btn_lbl.clone();
+            let pp3 = pp2.clone();
+            b.connect_clicked(move |_| {
+                if let Ok(s) = st2.try_borrow() {
+                    s.player.set_speed(val);
+                }
+                bl2.set_label(lbl);
+                pp3.popdown();
+            });
+            speed_box.append(&b);
+        }
+    }
+    // kaynak boyutları (arka planda ölç, kalite menüsünde göster)
     {
         let slot = state.borrow().sizes.clone();
         let urls: Vec<(usize, String)> = state
@@ -2265,37 +2323,42 @@ pub fn build_embedded_player(
             }
         });
     }
-    // seek üstü önizleme: bölüm kapağı + zaman (kare önizleme kutusu).
-    let prev_pic = gtk::Picture::new();
-    prev_pic.set_size_request(128, 72);
-    prev_pic.set_can_shrink(false);
-    prev_pic.set_content_fit(gtk::ContentFit::Cover);
-    let prev_lbl = gtk::Label::new(Some("--:--"));
-    prev_lbl.add_css_class("dim-label");
-    prev_lbl.set_xalign(0.5);
-    let prev_box = gtk::Box::new(gtk::Orientation::Vertical, 4);
-    prev_box.add_css_class("seek-prev");
-    prev_box.set_halign(gtk::Align::Start);
-    prev_box.set_valign(gtk::Align::End);
-    prev_box.set_margin_bottom(110);
-    prev_box.set_visible(false);
-    prev_box.append(&prev_pic);
-    prev_box.append(&prev_lbl);
-    stage.add_overlay(&prev_box);
-    load_thumb_async(
-        &client,
-        req.ep.thumbnail.clone().or(req.title.poster.clone()),
-        &prev_pic,
-        128,
-        72,
-    );
-    // seek üzerine gelince zaman ipucu
-    // seek üstü önizleme: zaman ipucu + kapaklı kare kutu.
+    // kaynak çözünürlükleri ve tau kalite listesi (arka planda çöz, menüde göster)
+    {
+        let slot = state.borrow().source_res.clone();
+        let tau_slot = state.borrow().tau_qualities.clone();
+        let client_c = client.clone();
+        let embeds: Vec<Option<String>> = res_embeds.clone();
+        std::thread::spawn(move || {
+            for (i, emb) in embeds.iter().enumerate() {
+                let Some(url) = emb else { continue };
+                let q_list = client_c.embed_quality_list(url);
+                if !q_list.is_empty() {
+                    if let Ok(mut tq) = tau_slot.lock() {
+                        if tq.is_empty() {
+                            *tq = q_list.clone();
+                        }
+                    }
+                    if let Ok(mut sl) = slot.lock() {
+                        if i < sl.len() {
+                            sl[i] = Some(q_list[0].0.clone());
+                        }
+                    }
+                } else {
+                    let res = client_c.embed_max_quality(url);
+                    if let Ok(mut sl) = slot.lock() {
+                        if i < sl.len() {
+                            sl[i] = res;
+                        }
+                    }
+                }
+            }
+        });
+    }
+    // seek üzerine gelince zaman tooltip'i (kare resimli preview kaldırıldı)
     {
         let st_c = state.clone();
         let seek_c = seek.clone();
-        let prev_c = prev_box.clone();
-        let lbl_c = prev_lbl.clone();
         let sm = gtk::EventControllerMotion::new();
         sm.connect_motion(move |_, x, _| {
             if let Ok(s) = st_c.try_borrow() {
@@ -2305,23 +2368,13 @@ pub fn build_embedded_player(
                     if w > 0.0 {
                         let t = d * (x / w).clamp(0.0, 1.0);
                         seek_c.set_tooltip_text(Some(&fmt_time(t)));
-                        lbl_c.set_text(&fmt_time(t));
-                        prev_c.set_margin_start(((x - 64.0).clamp(8.0, (w - 136.0).max(8.0))) as i32);
-                        prev_c.set_visible(true);
                         return;
                     }
                 }
                 seek_c.set_tooltip_text(None);
-                prev_c.set_visible(false);
             }
         });
         seek.add_controller(sm);
-        let prev_h = prev_box.clone();
-        let leave = gtk::EventControllerMotion::new();
-        leave.connect_leave(move |_| {
-            prev_h.set_visible(false);
-        });
-        seek.add_controller(leave);
     }
     // seek hover: çubuk kalınlaşır + imleç belirir.
     {
@@ -2350,8 +2403,8 @@ pub fn build_embedded_player(
                         s.ed_seek_done = true;
                     }
                     s.player.seek_abs(target);
-                    s.player.show_text("⏩ Atlandı", 2500);
-                    toast_in(&toast_c, "⏩ Atlandı", 2);
+                    s.player.show_text("Atlandı", 2500);
+                    toast_in(&toast_c, "Atlandı", 2);
                 }
                 rev_c.set_reveal_child(false);
             }
@@ -2451,7 +2504,7 @@ pub fn build_embedded_player(
                 if let Ok(s) = st2.try_borrow() {
                     s.player.seek_rel(secs);
                     s.player.show_text(
-                        if secs < 0.0 { "⏪ 10 saniye" } else { "10 saniye ⏩" },
+                        if secs < 0.0 { "10 saniye" } else { "10 saniye" },
                         1200,
                     );
                 }
@@ -2515,14 +2568,6 @@ pub fn build_embedded_player(
     {
         main_window.connect_fullscreened_notify(move |win| {
             eprintln!("[EMBED] fullscreen bildirimi: is_fullscreen={}", win.is_fullscreen());
-        });
-    }
-    {
-        let st_c = state.clone();
-        let rev_c = controls_revealer.clone();
-        fs_btn.connect_clicked(move |_| {
-            let on = !st_c.borrow().main_window.is_fullscreen();
-            set_fullscreen(&st_c, &rev_c, on);
         });
     }
     // klavye: space, oklar, s/e (aniskip), m + ses, f
@@ -2592,14 +2637,14 @@ pub fn build_embedded_player(
                             if let Ok(mut s2) = st_c.try_borrow_mut() {
                                 s2.op_seek_done = true;
                                 s2.player.seek_abs(et);
-                                s2.player.show_text("⏩ İntro atlandı", 2500);
+                                s2.player.show_text("İntro atlandı", 2500);
                             }
-                            toast_in(&toast_c, "⏩ İntro atlandı", 2);
+                            toast_in(&toast_c, "İntro atlandı", 2);
                         } else {
                             s.player.seek_abs(et);
                         }
                     } else {
-                        s.player.show_text("⚠️ İntro zamanı yok (AniSkip)", 2500);
+                        s.player.show_text("İntro zamanı yok (AniSkip)", 2500);
                     }
                     glib::Propagation::Stop
                 }
@@ -2611,14 +2656,14 @@ pub fn build_embedded_player(
                             if let Ok(mut s2) = st_c.try_borrow_mut() {
                                 s2.ed_seek_done = true;
                                 s2.player.seek_abs(et);
-                                s2.player.show_text("⏩ Outro atlandı", 2500);
+                                s2.player.show_text("Outro atlandı", 2500);
                             }
-                            toast_in(&toast_c, "⏩ Outro atlandı", 2);
+                            toast_in(&toast_c, "Outro atlandı", 2);
                         } else {
                             s.player.seek_abs(et);
                         }
                     } else {
-                        s.player.show_text("⚠️ Outro zamanı yok (AniSkip)", 2500);
+                        s.player.show_text("Outro zamanı yok (AniSkip)", 2500);
                     }
                     glib::Propagation::Stop
                 }
@@ -2650,16 +2695,16 @@ fn load_source_at(
 ) {
     let mut s = state.borrow_mut();
     if idx >= s.sources.len() {
-        status.set_text("Tüm kaynaklar denendi, açılamadı ⚠️");
+        status.set_text("Tüm kaynaklar denendi, açılamadı");
         toast_in(overlay, "Tüm kaynaklar denendi, video açılamadı", 4);
         return;
     }
     s.index = idx;
     s.load_started = Instant::now();
     s.media_loaded = false;
-    s.playing_shown = false;
     let src = s.sources[idx].clone();
     drop(s);
+    status.set_visible(false);
 
     match src {
         Source::Direct(url) => {
@@ -2713,7 +2758,8 @@ fn next_source(
     let next = state.borrow().index + 1;
     let total = state.borrow().sources.len();
     if next >= total {
-        status.set_text("Tüm kaynaklar denendi, açılamadı ⚠️");
+        status.set_text("Tüm kaynaklar denendi, açılamadı");
+        status.set_visible(true);
         toast_in(overlay, "Tüm kaynaklar denendi, video açılamadı", 4);
         return;
     }

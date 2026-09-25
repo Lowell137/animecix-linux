@@ -40,7 +40,7 @@ pub fn music_keybind_line(url: &str) -> String {
         "M run \"/bin/sh\" \"-c\" \"xdg-open '{safe}' || gio open '{safe}' || true\" ; \
          set osd-align-x right ; set osd-align-y top ; \
          set osd-margin-x 24 ; set osd-margin-y 85 ; \
-         show-text \"🌐 tarayıcıda açıldı\" 3000\n"
+         show-text \"tarayıcıda açıldı\" 3000\n"
     )
 }
 
@@ -65,13 +65,8 @@ pub fn music_ass(
 ) -> String {
     let mut ev = String::new();
     let mut one = |tag: &str, from: f64, to: f64, line: &str| {
-        // music_line() zaten "🎵 Açılış:" ön-eklidir; çiftlemeyi önle.
         let body = ass_text(line);
-        let mut text = if body.starts_with("🎵") {
-            format!("{{\\an9}}{}", body)
-        } else {
-            format!("{{\\an9}}🎵 {tag}: {}", body)
-        };
+        let mut text = format!("{{\\an9}}{tag}: {body}");
         if show_hint {
             text.push_str(" (Shift+M: tarayıcıda aç)");
         }
@@ -164,7 +159,7 @@ mod tests {
     #[test]
     fn music_ass_no_double_prefix() {
         let a = music_ass(
-            Some((43.0, 133.0, "🎵 Açılış: Your Gaze — Tatsuya Kitani ▶")),
+            Some((43.0, 133.0, "Açılış: Your Gaze — Tatsuya Kitani")),
             None,
             "Montserrat SemiBold",
             true,
@@ -175,7 +170,7 @@ mod tests {
 
     #[test]
     fn music_ass_shapes() {
-        let a = music_ass(Some((43.0, 133.0, "T — A ▶")), None, "Montserrat SemiBold", true);
+        let a = music_ass(Some((43.0, 133.0, "T — A")), None, "Montserrat SemiBold", true);
         assert!(a.contains("{\\an9}"), "sağ üst");
         assert!(a.contains("0:00:43.00,0:02:13.00"), "zaman: {a}");
         assert!(a.contains("Fontname") && a.contains("Montserrat SemiBold"), "font");

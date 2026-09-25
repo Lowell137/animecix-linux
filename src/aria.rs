@@ -1,4 +1,4 @@
-//! aria2 arka-ucu: harici `aria2c` daemon + JSON-RPC (6 bağlantı/segment).
+//! aria2 arka-ucu: harici `aria2c` daemon + JSON-RPC (bağlantı sayısı ayarlanabilir).
 //! Binary bulunamazsa çağıran iç motora düşer (`download.rs`).
 //! Yeni crate yok: reqwest (blocking) + serde_json + std.
 
@@ -12,7 +12,10 @@ use std::sync::{
 use crate::download::{DownloadEvent, DownloadHandle, UA};
 
 /// Segment/bağlantı sayısı (aria2 `-x/-s`).
+/// Varsayılan bağlantı/segment sayısı (kullanıcı ayarı yoksa bu).
 pub const SEGMENTS: u32 = 6;
+/// aria2'nin sunucu başına izin verdiği üst sınır.
+pub const MAX_CONNECTIONS: u32 = 16;
 /// RPC port aralığı (ilk boş olan alınır).
 const PORT_FIRST: u16 = 6800;
 const PORT_LAST: u16 = 6820;
@@ -104,23 +107,25 @@ fn rpc_call(port: u16, secret: &str, method: &str, params: serde_json::Value) ->
         .ok_or_else(|| "rpc sonuçsuz".to_string())
 }
 
-/// addUri seçenekleri kurar (saf; test edilir).
+/// addUri seçenekleri kurar (saf; test edilir). `conns` = dosya başına bağlantı.
 pub fn add_uri_options(
     dir: &str,
     out: &str,
     ua: &str,
     referer: Option<&str>,
+    conns: u32,
 ) -> serde_json::Value {
     let mut headers = vec![format!("User-Agent: {ua}")];
     if let Some(r) = referer {
         headers.push(format!("Referer: {r}"));
     }
+    let c = conns.max(1) as u64;
     serde_json::json!({
         "dir": dir,
         "out": out,
         "header": headers,
-        "split": SEGMENTS,
-        "max-connection-per-server": SEGMENTS,
+        "split": c,
+        "max-connection-per-server": c,
         "min-split-size": "1M",
         "continue": true,
         "check-certificate": true,
@@ -210,8 +215,9 @@ pub fn add_uri(
     out: &str,
     ua: &str,
     referer: Option<&str>,
+    conns: u32,
 ) -> Result<String, String> {
-    let opts = add_uri_options(dir, out, ua, referer);
+    let opts = add_uri_options(dir, out, ua, referer, conns);
     let res = rpc_call(
         port,
         secret,
@@ -283,6 +289,7 @@ pub fn start_download_aria(
     referer: Option<&str>,
     dest_final: &Path,
     tx: mpsc::Sender<crate::download::DownloadEvent>,
+    conns: u32,
 ) -> crate::download::DownloadHandle {
     use crate::download::DownloadEvent;
     let cancel = Arc::new(AtomicBool::new(false));
@@ -312,7 +319,7 @@ pub fn start_download_aria(
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| "video.mp4".to_string());
-        let gid = match add_uri(port, &secret, &url, &dir, &out, UA, referer.as_deref()) {
+        let gid = match add_uri(port, &secret, &url, &dir, &out, UA, referer.as_deref(), conns) {
             Ok(g) => g,
             Err(e) => {
                 let _ = tx.send(DownloadEvent::Error(format!("aria2 kuyruk: {e}")));
@@ -390,7 +397,7 @@ mod tests {
 
     #[test]
     fn add_uri_options_shapes() {
-        let o = add_uri_options("/tmp/x", "v.mp4", "UA-Test", Some("http://ref/"));
+        let o = add_uri_options("/tmp/x", "v.mp4", "UA-Test", Some("http://ref/"), SEGMENTS);
         assert_eq!(o["dir"], "/tmp/x");
         assert_eq!(o["out"], "v.mp4");
         assert_eq!(o["split"], SEGMENTS);
@@ -405,6 +412,16 @@ mod tests {
             .collect();
         assert!(hdrs.iter().any(|h| h == "User-Agent: UA-Test"), "{hdrs:?}");
         assert!(hdrs.iter().any(|h| h == "Referer: http://ref/"), "{hdrs:?}");
+    }
+
+    #[test]
+    fn add_uri_options_uses_connection_setting() {
+        // Ayar bağlantı sayısına işlenir; 0 gibi bozuk değer 1'e çekilir.
+        let c = add_uri_options("/tmp/x", "v.mp4", "UA", None, 12);
+        assert_eq!(c["split"], 12);
+        assert_eq!(c["max-connection-per-server"], 12);
+        let z = add_uri_options("/tmp/x", "v.mp4", "UA", None, 0);
+        assert_eq!(z["split"], 1);
     }
 
     #[test]
@@ -464,7 +481,7 @@ mod tests {
         let dest = dir.join("v.mp4");
         let url = format!("http://127.0.0.1:{port}/v.mp4");
         let (tx, rx) = mpsc::channel();
-        let _h = start_download_aria(&url, None, &dest, tx);
+        let _h = start_download_aria(&url, None, &dest, tx, SEGMENTS);
         let mut done = false;
         for ev in rx.iter() {
             match ev {

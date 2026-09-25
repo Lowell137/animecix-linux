@@ -37,10 +37,42 @@ pub fn find_template(list: &[FansubInfo], template_id: i64) -> Option<FansubInfo
 
 struct State {
     items: Vec<(Episode, Vec<FansubInfo>)>,
-    /// tour[pos] bölümünün seçimi.
+    /// tour[pos] bölümünün çevirmen seçimi.
     choice: Vec<Option<FansubInfo>>,
+    /// tour[pos] bölümünün kalite seçimi; None = genel seçim.
+    qchoice: Vec<Option<String>>,
     page: usize,
     pages: Vec<PageKind>,
+}
+
+/// Bölüm kartındaki kalite seçenekleri: ilk sıradaki genel seçimi kullanır.
+const QUALITY_IDS: &[(&str, &str)] = &[
+    ("En iyi", "best"),
+    ("1080p", "1080p"),
+    ("720p", "720p"),
+    ("480p", "480p"),
+];
+
+/// Kalite anahtarını görünen ada çevirir.
+pub fn quality_label(q: &str) -> String {
+    if q == "best" { "En iyi".to_string() } else { q.to_string() }
+}
+
+/// Açılır listenin satırları (0. sıra = genel).
+pub fn quality_options(default_q: &str) -> Vec<String> {
+    let mut v: Vec<String> =
+        QUALITY_IDS.iter().map(|(label, _)| label.to_string()).collect();
+    v.insert(0, format!("Genel seçim · {}", quality_label(default_q)));
+    v
+}
+
+/// DropDown sırası → kalite override'ı (None = genel seçim).
+pub fn quality_at(idx: usize) -> Option<String> {
+    if idx == 0 {
+        None
+    } else {
+        QUALITY_IDS.get(idx - 1).map(|(_, id)| (*id).to_string())
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -69,7 +101,7 @@ fn fansub_card(fs: &FansubInfo, selected: bool) -> gtk::Button {
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     hbox.append(&name);
     if fs.rating > 0.0 {
-        let rate = gtk::Label::new(Some(&format!("★ {:.1}", fs.rating)));
+        let rate = gtk::Label::new(Some(&format!("{:.1}", fs.rating)));
         rate.add_css_class("accent");
         hbox.append(&rate);
     }
@@ -98,13 +130,15 @@ fn mark_selected(listbox: &gtk::Box, selected_btn: &gtk::Button) {
     }
 }
 
-/// Flashcard turunu açar. Bitince seçilen (bölüm, çevirmen) çiftleri döner;
-/// kapatılırsa hiçbir şey dönmez (çöpe atılır).
+/// Flashcard turunu açar. Bitince seçilen (bölüm, çevirmen, kalite-override)
+/// üçlüsü döner; kapatılırsa hiçbir şey dönmez (çöpe atılır).
+/// `default_quality` bölüm kartındaki kalite listesinin 0. sırasıdır.
 pub fn show_flashcard_wizard(
     parent: &adw::ApplicationWindow,
     title: &Title,
     items: Vec<(Episode, Vec<FansubInfo>)>,
-    on_done: impl Fn(Vec<(Episode, FansubInfo)>) + 'static,
+    default_quality: &str,
+    on_done: impl Fn(Vec<(Episode, FansubInfo, Option<String>)>) + 'static,
 ) {
     // Tur: çevirisi olan bölümler (boşlar özetten atlanır).
     let tour: Rc<Vec<usize>> = Rc::new(
@@ -136,8 +170,10 @@ pub fn show_flashcard_wizard(
             choice[pos] = Some(items[t].1[0].clone());
         }
     }
+    let qchoice: Vec<Option<String>> = vec![None; tour.len()];
 
-    let st = Rc::new(RefCell::new(State { items, choice, page: 0, pages }));
+    let default_quality = default_quality.to_string();
+    let st = Rc::new(RefCell::new(State { items, choice, qchoice, page: 0, pages }));
     let on_done = Rc::new(on_done);
 
     let dlg = gtk::Window::builder()
@@ -225,7 +261,7 @@ pub fn show_flashcard_wizard(
                 stack_r.remove(&old);
             }
             stack_r.add_named(
-                &build_summary(&s.items, &s.choice, &tour_r, skipped_empty),
+                &build_summary(&s.items, &s.choice, &s.qchoice, &tour_r, skipped_empty),
                 Some("pg_summary"),
             );
         }
@@ -236,7 +272,7 @@ pub fn show_flashcard_wizard(
             && s.page + 1 < total
             && matches!(s.pages[s.page + 1], PageKind::Summary);
         next_btn_r.set_label(if is_summary {
-            "Bitir ✓"
+            "Bitir"
         } else if at_last_ep {
             "Özete Git →"
         } else if matches!(kind, PageKind::Common) {
@@ -315,6 +351,23 @@ pub fn show_flashcard_wizard(
         head.set_xalign(0.0);
         head.add_css_class("title-2");
         vbox.append(&head);
+        // Bölüme özel kalite; ilk sıra genel seçimi kullanır.
+        let qrow = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let qlabel = gtk::Label::new(Some("Kalite"));
+        qlabel.add_css_class("dim-label");
+        let qopts = quality_options(&default_quality);
+        let qrefs: Vec<&str> = qopts.iter().map(String::as_str).collect();
+        let qdrop = gtk::DropDown::from_strings(&qrefs);
+        qdrop.set_halign(gtk::Align::Start);
+        qrow.append(&qlabel);
+        qrow.append(&qdrop);
+        vbox.append(&qrow);
+        {
+            let st_c = st.clone();
+            qdrop.connect_selected_notify(move |d| {
+                st_c.borrow_mut().qchoice[pos] = quality_at(d.selected() as usize);
+            });
+        }
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_vexpand(true);
         let listbox = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -383,6 +436,13 @@ pub fn show_flashcard_wizard(
                             }
                         }
                     }
+                    if let Some(q) = current_quality(&s, &tour_c) {
+                        for slot in s.qchoice.iter_mut() {
+                            if slot.is_none() {
+                                *slot = Some(q.clone());
+                            }
+                        }
+                    }
                     apply_c.set_active(false);
                 }
                 let is_summary = matches!(s.pages[s.page], PageKind::Summary);
@@ -392,13 +452,15 @@ pub fn show_flashcard_wizard(
                 is_summary
             };
             if finish {
-                let done: Vec<(Episode, FansubInfo)> = {
+                let done: Vec<(Episode, FansubInfo, Option<String>)> = {
                     let s = st_c.borrow();
                     tour_c
                         .iter()
                         .enumerate()
                         .filter_map(|(pos, &t)| {
-                            s.choice[pos].clone().map(|fs| (s.items[t].0.clone(), fs))
+                            s.choice[pos].clone().map(|fs| {
+                                (s.items[t].0.clone(), fs, s.qchoice[pos].clone())
+                            })
                         })
                         .collect()
                 };
@@ -422,9 +484,17 @@ fn current_choice(s: &State, tour: &[usize]) -> Option<FansubInfo> {
     s.choice.get(pos).cloned().flatten()
 }
 
+/// O anki sayfadaki kalite override'ı (Hepsine uygula kaynağı).
+fn current_quality(s: &State, tour: &[usize]) -> Option<String> {
+    let PageKind::Ep(t) = s.pages[s.page] else { return None };
+    let pos = tour.iter().position(|&x| x == t)?;
+    s.qchoice.get(pos).cloned().flatten()
+}
+
 fn build_summary(
     items: &[(Episode, Vec<FansubInfo>)],
     choice: &[Option<FansubInfo>],
+    qchoice: &[Option<String>],
     tour: &[usize],
     skipped_empty: usize,
 ) -> gtk::Box {
@@ -435,8 +505,16 @@ fn build_summary(
     let list = gtk::Box::new(gtk::Orientation::Vertical, 4);
     for (pos, &t) in tour.iter().enumerate() {
         let (ep, _) = &items[t];
+        let override_q = qchoice
+            .get(pos)
+            .and_then(|c| c.as_ref())
+            .map(|q| format!(" · {}", quality_label(q)))
+            .unwrap_or_default();
         let txt = match choice.get(pos).and_then(|c| c.as_ref()) {
-            Some(fs) => format!("S{:02}E{:02} → {} ({:.1}★)", ep.season, ep.episode, fs.name, fs.rating),
+            Some(fs) => format!(
+                "S{:02}E{:02} → {} ({:.1} puan){}",
+                ep.season, ep.episode, fs.name, fs.rating, override_q
+            ),
             None => format!("S{:02}E{:02} → atlanacak", ep.season, ep.episode),
         };
         let lbl = gtk::Label::new(Some(&txt));
@@ -475,6 +553,17 @@ mod tests {
             hosts: Vec::new(),
             mirrors: Vec::new(),
         }
+    }
+
+    #[test]
+    fn quality_option_roundtrip() {
+        let opts = quality_options("best");
+        assert_eq!(opts[0], "Genel seçim · En iyi");
+        assert_eq!(quality_at(0), None, "ilk sıra override yok");
+        assert_eq!(quality_at(1).as_deref(), Some("best"));
+        assert_eq!(quality_at(4).as_deref(), Some("480p"));
+        assert_eq!(quality_at(9), None, "olmayan sıra");
+        assert_eq!(quality_options("720p")[0], "Genel seçim · 720p");
     }
 
     #[test]

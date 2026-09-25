@@ -68,8 +68,8 @@ impl MarathonView {
         let marathon_items = client.get_marathon();
         if marathon_items.is_empty() {
             let sp = crate::ui::components::create_status_page(
-                "İzleme Maratonunuz Boş 🏃‍♂️",
-                "Gelecekte izleyeceğiniz anime, dizi ve filmleri detay sayfasındaki maraton butonuna (🏁) tıklayarak ekleyebilirsiniz.",
+                "İzleme Maratonunuz Boş",
+                "Gelecekte izleyeceğiniz anime, dizi ve filmleri detay sayfasındaki maraton butonuna () tıklayarak ekleyebilirsiniz.",
                 "media-playlist-repeat-symbolic",
             );
             root.append(&sp);
@@ -82,7 +82,7 @@ impl MarathonView {
         summary_card.add_css_class("marathon-summary-card");
 
         let top_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-        let header_lbl = gtk::Label::new(Some("🏃‍♂️ İzleme Maratonu İlerlemesi"));
+        let header_lbl = gtk::Label::new(Some("İzleme Maratonu İlerlemesi"));
         header_lbl.add_css_class("title-2");
         header_lbl.set_xalign(0.0);
         header_lbl.set_hexpand(true);
@@ -227,10 +227,13 @@ impl MarathonView {
             name_lbl.set_single_line_mode(true);
             name_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
             if item.completed { name_lbl.add_css_class("dim-label"); }
-            let status_badge = gtk::Label::new(Some(if item.completed { "🏁 Tamamlandı" } else { "⏳ Devam Ediyor" }));
-            status_badge.add_css_class(if item.completed { "status-badge-completed" } else { "status-badge-progress" });
+            let (badge, badge_icon, badge_lbl) = crate::ui::components::status_label(
+                if item.completed { "object-select-symbolic" } else { "alarm-symbolic" },
+                if item.completed { "Tamamlandı" } else { "Devam Ediyor" },
+            );
+            badge.add_css_class(if item.completed { "status-badge-completed" } else { "status-badge-progress" });
             title_row.append(&name_lbl);
-            title_row.append(&status_badge);
+            title_row.append(&badge);
             info_box.append(&title_row);
             episodes_view::append_title_submeta(&info_box, &item.title);
 
@@ -244,7 +247,9 @@ impl MarathonView {
             let (tx, rx) = std::sync::mpsc::channel::<f64>();
             std::thread::spawn(move || { let _ = tx.send(client_c.title_progress_frac(&t_c)); });
             let chk_u = chk.clone();
-            let badge_u = status_badge.clone();
+            let badge_u = badge.clone();
+            let badge_icon_u = badge_icon.clone();
+            let badge_lbl_u = badge_lbl.clone();
             let name_u = name_lbl.clone();
             let guard_u = chk_guard.clone();
             glib::idle_add_local(move || match rx.try_recv() {
@@ -255,7 +260,12 @@ impl MarathonView {
                     chk_u.set_active(done);
                     guard_u.set(false);
                     chk_u.set_tooltip_text(Some(if done { "Tamamlandı olarak işaretli" } else { "Tamamlandı olarak işaretle" }));
-                    badge_u.set_text(if done { "🏁 Tamamlandı" } else { "⏳ Devam Ediyor" });
+                    badge_lbl_u.set_text(if done { "Tamamlandı" } else { "Devam Ediyor" });
+                    badge_icon_u.set_from_icon_name(Some(if done {
+                        "object-select-symbolic"
+                    } else {
+                        "alarm-symbolic"
+                    }));
                     badge_u.remove_css_class("status-badge-completed");
                     badge_u.remove_css_class("status-badge-progress");
                     badge_u.add_css_class(if done { "status-badge-completed" } else { "status-badge-progress" });
@@ -267,7 +277,7 @@ impl MarathonView {
 
             let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             actions.set_valign(gtk::Align::Center);
-            let play_btn = gtk::Button::with_label("▶ İzle");
+            let play_btn = crate::ui::components::icon_button("media-playback-start-symbolic", "İzle");
             play_btn.add_css_class("suggested-action");
             play_btn.add_css_class("pill");
             let on_ic = on_item_click_rc.clone();
@@ -444,7 +454,7 @@ impl HistoryView {
             text_box.append(&sub);
             episodes_view::append_title_submeta(&text_box, &h.title);
 
-            let click_btn = gtk::Button::with_label("▶ İzle");
+            let click_btn = crate::ui::components::icon_button("media-playback-start-symbolic", "İzle");
             click_btn.add_css_class("suggested-action");
             click_btn.add_css_class("pill");
             click_btn.set_valign(gtk::Align::Center);
@@ -593,16 +603,26 @@ impl SettingsView {
         settings: &Settings,
         on_save: impl Fn(Settings) + 'static,
         on_wipe: impl Fn(bool) + 'static,
-    ) -> gtk::Box {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        root.set_margin_top(12);
-        root.set_margin_bottom(12);
-        root.set_margin_start(16);
-        root.set_margin_end(16);
-        root.set_margin_top(12);
-        root.set_margin_bottom(12);
-        root.set_margin_start(16);
-        root.set_margin_end(16);
+    ) -> adw::PreferencesDialog {
+        let dialog = adw::PreferencesDialog::new();
+        dialog.set_title("Ayarlar");
+        dialog.set_search_enabled(true);
+
+        let page_view = adw::PreferencesPage::new();
+        page_view.set_title("Görünüm");
+        page_view.set_icon_name(Some("applications-graphics-symbolic"));
+
+        let page_keys = adw::PreferencesPage::new();
+        page_keys.set_title("Gezinme");
+        page_keys.set_icon_name(Some("input-keyboard-symbolic"));
+
+        let page_player = adw::PreferencesPage::new();
+        page_player.set_title("Oynatıcı");
+        page_player.set_icon_name(Some("media-playback-start-symbolic"));
+
+        let page_data = adw::PreferencesPage::new();
+        page_data.set_title("Depolama");
+        page_data.set_icon_name(Some("drive-harddisk-symbolic"));
 
         let ep_group = adw::PreferencesGroup::new();
         ep_group.set_title("Hızlı Bölüm Arama");
@@ -624,7 +644,7 @@ impl SettingsView {
 
         ep_group.add(&search_toggle_row);
         ep_group.add(&shortcut_row);
-        root.append(&ep_group);
+        page_keys.add(&ep_group);
 
         let search_group = adw::PreferencesGroup::new();
         search_group.set_title("Anime / Dizi Arama Kısayolu");
@@ -638,7 +658,29 @@ impl SettingsView {
         let current_sc = search_shortcuts.iter().position(|&s| s == settings.search_shortcut).unwrap_or(0);
         search_sc_row.set_selected(current_sc as u32);
         search_group.add(&search_sc_row);
-        root.append(&search_group);
+        page_keys.add(&search_group);
+        let sidebar_group = adw::PreferencesGroup::new();
+        sidebar_group.set_title("Sidebar Sekmeleri");
+        let sidebar_rows: Vec<(&'static str, adw::SwitchRow)> = [
+            ("kesfet", "Keşfet"),
+            ("favs", "Favoriler"),
+            ("marathon", "Maraton"),
+            ("history", "Geçmiş"),
+            ("calendar", "Takvim"),
+            ("news", "Haberler"),
+            ("downloads", "İndirilenler"),
+        ]
+        .into_iter()
+        .map(|(key, title)| {
+            let row = adw::SwitchRow::new();
+            row.set_title(title);
+            row.set_subtitle("Sidebar'da göster");
+            row.set_active(settings.sidebar_visible.iter().any(|v| v == key));
+            sidebar_group.add(&row);
+            (key, row)
+        })
+        .collect();
+        page_keys.add(&sidebar_group);
 
         let view_group = adw::PreferencesGroup::new();
         view_group.set_title("Görünüm");
@@ -658,7 +700,25 @@ impl SettingsView {
         };
         scale_row.set_selected(current_scale);
         view_group.add(&scale_row);
-        root.append(&view_group);
+
+        let blur_row = adw::SwitchRow::new();
+        blur_row.set_title("İzlenmeyen bölümleri bulanıklaştır");
+        blur_row.set_subtitle("Bölüm ızgarasında henüz izlenmemiş bölümlerin kapak görsellerini spoiler olmasın diye bulanık gösterir");
+        blur_row.set_active(settings.blur_unwatched);
+        view_group.add(&blur_row);
+
+        let gradient_row = adw::SwitchRow::new();
+        gradient_row.set_title("Vurgu rengi gradyan arka plan");
+        gradient_row.set_subtitle("Dizi detay sayfasının arka planını afişin baskın renklerinden oluşan yumuşak bir gradyanla boyar");
+        gradient_row.set_active(settings.gradient_bg);
+        view_group.add(&gradient_row);
+
+        let frosted_row = adw::SwitchRow::new();
+        frosted_row.set_title("Buzlu cam efekti");
+        frosted_row.set_subtitle("Dizi detay sayfasındaki başlık kartını gradyanın üstünde yarı saydam cam gibi gösterir");
+        frosted_row.set_active(settings.frosted_glass);
+        view_group.add(&frosted_row);
+        page_view.add(&view_group);
 
         let player_group = adw::PreferencesGroup::new();
         player_group.set_title("Oynatıcı Ayarları");
@@ -692,7 +752,13 @@ impl SettingsView {
         auto_next_row.set_subtitle("Bölüm bitince bir sonraki bölüme otomatik geçer");
         auto_next_row.set_active(settings.auto_next_episode);
         player_group.add(&auto_next_row);
-        root.append(&player_group);
+
+        let local_hist_row = adw::SwitchRow::new();
+        local_hist_row.set_title("Yerel geçmişi kaydet");
+        local_hist_row.set_subtitle("Kapalıysa bu cihazda izlenenler kaydedilmez; sadece sitedeki geçmiş gösterilir");
+        local_hist_row.set_active(settings.local_history_enabled);
+        player_group.add(&local_hist_row);
+        page_player.add(&player_group);
 
         let perf_group = adw::PreferencesGroup::new();
         perf_group.set_title("Performans");
@@ -712,7 +778,7 @@ impl SettingsView {
         patience_spin.set_value(settings.source_patience_secs as f64);
         patience_row.add_suffix(&patience_spin);
         perf_group.add(&patience_row);
-        root.append(&perf_group);
+        page_view.add(&perf_group);
 
 
         let img_group = adw::PreferencesGroup::new();
@@ -748,7 +814,7 @@ impl SettingsView {
         upscale_desc.set_selectable(false);
         upscale_desc.add_css_class("dim-label");
         img_group.add(&upscale_desc);
-        root.append(&img_group);
+        page_player.add(&img_group);
 
         let fansub_group = adw::PreferencesGroup::new();
         fansub_group.set_title("Çeviri (Fansub) Seçimi");
@@ -757,11 +823,6 @@ impl SettingsView {
         ask_row.set_subtitle("Kapalıysa otomatik olarak en yüksek puanlı çeviri seçilir");
         ask_row.set_active(settings.fansub_ask_each_time);
         fansub_group.add(&ask_row);
-        let local_hist_row = adw::SwitchRow::new();
-        local_hist_row.set_title("Yerel geçmişi kaydet");
-        local_hist_row.set_subtitle("Kapalıysa bu cihazda izlenenler kaydedilmez; sadece sitedeki geçmiş gösterilir");
-        local_hist_row.set_active(settings.local_history_enabled);
-        fansub_group.add(&local_hist_row);
         let fansub_desc = gtk::Label::new(Some(
             "Bir bölüme tıkladığınızda mevcut çeviriler listelenir (örn. Kirigana, Wolwead). Puan yıldızı topluluk oylarına dayanır.",
         ));
@@ -773,7 +834,7 @@ impl SettingsView {
         fansub_desc.set_selectable(false);
         fansub_desc.add_css_class("dim-label");
         fansub_group.add(&fansub_desc);
-        root.append(&fansub_group);
+        page_player.add(&fansub_group);
         let on_save = Rc::new(on_save);
         let dl_group = adw::PreferencesGroup::new();
         dl_group.set_title("İndirme");
@@ -816,9 +877,26 @@ impl SettingsView {
                 );
             });
         }
-        root.append(&dl_group);
-        let install_group = crate::installer::build_installer_ui(&window);
-        root.append(&install_group);
+        const CONN_VALUES: &[u32] = &[1, 2, 4, 6, 8, 12, 16];
+        let conn_labels: Vec<String> =
+            CONN_VALUES.iter().map(|n| format!("{n} bağlantı")).collect();
+        let conn_refs: Vec<&str> = conn_labels.iter().map(String::as_str).collect();
+        let conn_row = adw::ComboRow::new();
+        conn_row.set_title("Bağlantı Sayısı");
+        conn_row.set_subtitle("Her dosyayı kaç paralel bağlantıyla indirir. Sunucu tek bağlantıya izin veriyorsa düşürün");
+        conn_row.set_model(Some(&gtk::StringList::new(&conn_refs)));
+        let cur_conn = CONN_VALUES
+            .iter()
+            .position(|&v| v == settings.download_connections)
+            .unwrap_or(2);
+        conn_row.set_selected(cur_conn as u32);
+        dl_group.add(&conn_row);
+        page_data.add(&dl_group);
+        let install_pref_group = adw::PreferencesGroup::new();
+        install_pref_group.set_title("Sistem Kurulumu");
+        let install_ui = crate::installer::build_installer_ui(window);
+        install_pref_group.add(&install_ui);
+        page_data.add(&install_pref_group);
         let update_group = adw::PreferencesGroup::new();
         let auto_update_row = adw::SwitchRow::new();
         auto_update_row.set_title("Otomatik Güncelleme");
@@ -854,7 +932,7 @@ impl SettingsView {
             }
         });
         update_group.add(&check_btn);
-        root.append(&update_group);
+        page_data.add(&update_group);
 
         let shortcut_row_c = shortcut_row.clone();
         search_toggle_row.connect_active_notify(move |r| {
@@ -868,6 +946,9 @@ impl SettingsView {
             let sc_r = shortcut_row.clone();
             let ssc_r = search_sc_row.clone();
             let scale_r = scale_row.clone();
+            let bl_r = blur_row.clone();
+            let grad_r = gradient_row.clone();
+            let frost_r = frosted_row.clone();
             let fs_r = fs_row.clone();
             let emb_r = embed_row.clone();
             let ani_r = aniskip_row.clone();
@@ -880,6 +961,8 @@ impl SettingsView {
             let patience_spin_c = patience_spin.clone();
             let ask_r = ask_row.clone();
             let hist_r = local_hist_row.clone();
+            let conn_r = conn_row.clone();
+            let sidebar_rows_c = sidebar_rows.clone();
             let s = s_base.clone();
             let on_save = on_save.clone();
             Rc::new(move || {
@@ -902,6 +985,9 @@ impl SettingsView {
                     2 => 1.5,
                     _ => 1.0,
                 };
+                updated.blur_unwatched = bl_r.is_active();
+                updated.gradient_bg = grad_r.is_active();
+                updated.frosted_glass = frost_r.is_active();
                 updated.auto_fullscreen = fs_r.is_active();
                 updated.embedded_player = emb_r.is_active();
                 updated.aniskip_enabled = ani_r.is_active();
@@ -920,6 +1006,17 @@ impl SettingsView {
                 updated.source_patience_secs = patience_spin_c.value() as u64;
                 updated.fansub_ask_each_time = ask_r.is_active();
                 updated.local_history_enabled = hist_r.is_active();
+                let i = conn_r.selected() as usize;
+                updated.download_connections = CONN_VALUES.get(i).copied().unwrap_or(6);
+                updated.sidebar_visible = {
+                    let mut visible = vec!["home".to_string()];
+                    for (key, row) in &sidebar_rows_c {
+                        if row.is_active() {
+                            visible.push((*key).to_string());
+                        }
+                    }
+                    visible
+                };
                 on_save(updated);
             })
         };
@@ -955,8 +1052,20 @@ impl SettingsView {
         upscale_row.connect_selected_notify(move |_| sa8());
         let sa9 = save_all.clone();
         light_row.connect_active_notify(move |_| sa9());
+        let sa_blur = save_all.clone();
+        blur_row.connect_active_notify(move |_| sa_blur());
+        let sa_grad = save_all.clone();
+        gradient_row.connect_active_notify(move |_| sa_grad());
+        let sa_frost = save_all.clone();
+        frosted_row.connect_active_notify(move |_| sa_frost());
         let sa10 = save_all.clone();
         patience_spin.connect_value_changed(move |_| sa10());
+        let sa_conn = save_all.clone();
+        conn_row.connect_selected_notify(move |_| sa_conn());
+        for (_, row) in &sidebar_rows {
+            let sa = save_all.clone();
+            row.connect_active_notify(move |_| sa());
+        }
 
         let data_group = adw::PreferencesGroup::new();
         data_group.set_title("Veri Yönetimi");
@@ -978,7 +1087,7 @@ impl SettingsView {
             let parent_win = btn.root().and_downcast::<gtk::Window>();
 
             let dialog = adw::MessageDialog::builder()
-                .heading("Kalıcı Sıfırlama Onayı ⚠️")
+                .heading("Kalıcı Sıfırlama Onayı")
                 .body(if remove_app {
                     "Tüm izleme geçmişiniz, ayarlarınız, kapak önbelleği ve UYGULAMA DOSYALARI sisteminizden kalıcı olarak silinecek. Emin misiniz?"
                 } else {
@@ -1006,7 +1115,7 @@ impl SettingsView {
             dialog.present();
         });
         data_group.add(&wipe_btn);
-        root.append(&data_group);
+        page_data.add(&data_group);
 
         let info_group = adw::PreferencesGroup::new();
         info_group.set_title("Uygulama Bilgisi");
@@ -1015,7 +1124,7 @@ impl SettingsView {
         ver_row.set_title("Sürüm Numarası");
         ver_row.set_subtitle(&format!("AnimeciX Masaüstü İstemcisi  •  v{}", env!("CARGO_PKG_VERSION")));
 
-        let ver_badge = gtk::Label::new(Some("Güncel ✓"));
+        let ver_badge = gtk::Label::new(Some("Güncel"));
         ver_badge.add_css_class("status-badge-completed");
         ver_badge.set_valign(gtk::Align::Center);
         ver_row.add_suffix(&ver_badge);
@@ -1030,8 +1139,13 @@ impl SettingsView {
         });
         info_group.add(&reinstall_btn);
 
-        root.append(&info_group);
+        page_data.add(&info_group);
 
-        root
+        dialog.add(&page_view);
+        dialog.add(&page_keys);
+        dialog.add(&page_player);
+        dialog.add(&page_data);
+
+        dialog
     }
 }

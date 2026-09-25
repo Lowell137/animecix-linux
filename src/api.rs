@@ -126,6 +126,26 @@ where
 }
 
 impl Title {
+    /// Kimlik + addan ibaret asgari başlık: diskindeki bir dosyayı oynatmak gibi,
+    /// künyeye ihtiyaç duymayan yollar için (poster/tür alanları boş kalır).
+    pub fn minimal(id: u64, name: &str) -> Title {
+        Title {
+            id,
+            name: name.to_string(),
+            year: None,
+            title_type: None,
+            poster: None,
+            description: None,
+            season_count: None,
+            genres: None,
+            runtime: None,
+            episode_count: None,
+            release_date: None,
+            rating: None,
+            backdrop: None,
+        }
+    }
+
     pub fn from_value(r: &serde_json::Value) -> Option<Title> {
         let id = r["id"].as_u64().or_else(|| r["title_id"].as_u64())?;
         let tt = r["title_type"].as_str().unwrap_or("").to_string();
@@ -205,14 +225,23 @@ impl Title {
         t.to_string()
     }
 
-    pub fn genre_line(&self) -> Option<String> {
-        let gens = self.genres.as_ref()?;
+    /// Çevrilmiş, tekilleştirilmiş, "Animasyon" elenmiş tür etiketleri (çip için).
+    pub fn genre_chips(&self) -> Vec<String> {
+        let gens = match self.genres.as_ref() {
+            Some(g) => g,
+            None => return Vec::new(),
+        };
         let mut parts: Vec<String> = gens
             .iter()
             .map(|g| Self::tr_genre(g))
             .filter(|g| g != "Animasyon")
             .collect();
         parts.dedup();
+        parts
+    }
+
+    pub fn genre_line(&self) -> Option<String> {
+        let parts = self.genre_chips();
         if parts.is_empty() {
             None
         } else {
@@ -264,6 +293,39 @@ impl Title {
         .flatten()
         .collect();
         parts.join("  •  ")
+    }
+
+    /// Detay başlığındaki dikey künye bloğu: (etiket, değer) — yalnızca veri varsa.
+    pub fn detail_rows(&self) -> Vec<(String, String)> {
+        let mut rows: Vec<(String, String)> = Vec::new();
+        let type_lbl = match self.title_type.as_deref() {
+            Some("anime") => Some("TV"),
+            Some("movie") => Some("Film"),
+            Some(other) if !other.is_empty() => Some("Dizi"),
+            _ => None,
+        };
+        if let Some(t) = type_lbl {
+            rows.push(("Tür".into(), t.into()));
+        }
+        if let Some(y) = self.year {
+            rows.push(("Yıl".into(), y.to_string()));
+        }
+        if let Some(ec) = self.episode_count {
+            if ec > 0 {
+                rows.push(("Bölüm".into(), ec.to_string()));
+            }
+        }
+        if let Some(rt) = self.runtime {
+            if rt > 0 {
+                rows.push(("Süre".into(), format!("{rt} dk")));
+            }
+        }
+        if let Some(rd) = &self.release_date {
+            if let Some(d) = Self::fmt_release_date(rd) {
+                rows.push(("Yayın".into(), d));
+            }
+        }
+        rows
     }
 }
 
@@ -579,18 +641,33 @@ pub struct Settings {
     pub fansub_ask_each_time: bool,
     #[serde(default)]
     pub download_dir: Option<String>,
+    /// Dosya başına eşzamanlı indirme bağlantısı/segment sayısı (aria2c `-s`, iç motor `-x`).
+    #[serde(default = "default_connections")]
+    pub download_connections: u32,
     #[serde(default = "default_true")]
     pub local_history_enabled: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
     #[serde(default)]
     pub sidebar_collapsed: bool,
+    /// Sidebar'da gösterilecek sekme anahtarları. Ana sayfa daima korunur.
+    #[serde(default = "default_sidebar_visible")]
+    pub sidebar_visible: Vec<String>,
     #[serde(default = "default_false")]
     pub focus_mode: bool,
     #[serde(default = "default_true")]
     pub auto_next_episode: bool,
     #[serde(default = "default_false")]
     pub welcome_seen: bool,
+    /// İzlenmemiş bölümlerin bannerları spoiler için bulanıklaştırılır.
+    #[serde(default = "default_true")]
+    pub blur_unwatched: bool,
+    /// Anime/film detay sayfası, banner vurgu renklerinden gradyan fon kullanır.
+    #[serde(default = "default_true")]
+    pub gradient_bg: bool,
+    /// Detay sayfası hero'sunda buzlu cam (yarı saydam + noise) katmanı.
+    #[serde(default = "default_true")]
+    pub frosted_glass: bool,
 }
 fn default_loading() -> String { "overlay".into() }
 fn default_quick_search() -> bool { true }
@@ -601,6 +678,13 @@ fn default_false() -> bool { false }
 fn default_upscale() -> String { "hafif".into() }
 fn default_patience() -> u64 { 20 }
 fn default_ui_scale() -> f32 { 1.0 }
+fn default_connections() -> u32 { 6 }
+fn default_sidebar_visible() -> Vec<String> {
+    ["home", "kesfet", "favs", "marathon", "history", "calendar", "news", "downloads"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
 
 /// Maraton özet kartı için (tamamlanan_sayısı, yüzde) hesaplar.
 /// Girdi: her yapımın 0.0-1.0 arası ilerleme oranı.
@@ -690,12 +774,17 @@ impl Default for Settings {
             default_fansub_template: None,
             fansub_ask_each_time: true,
             download_dir: None,
+            download_connections: default_connections(),
             local_history_enabled: default_true(),
             ui_scale: default_ui_scale(),
             sidebar_collapsed: false,
+            sidebar_visible: default_sidebar_visible(),
             focus_mode: false,
             auto_next_episode: true,
             welcome_seen: false,
+            blur_unwatched: true,
+            gradient_bg: true,
+            frosted_glass: true,
         }
     }
 }
@@ -1602,6 +1691,102 @@ impl Client {
             if candidates.len() >= 8 { break; }
         }
         Ok(candidates)
+    }
+
+    /// Bölüm kaynaklarının (embed url → kalite etiketi) haritası.
+    /// `episode_points` önbelleğini (30dk) kullanır; etiket "1080p"/"720p"/"480p"/"en iyi" vb.
+    /// Oynatıcıdaki "Kalite" listesinde her kaynağın gerçek çözünürlüğünü göstermek için.
+    pub fn episode_quality_map(
+        &self,
+        title_id: u64,
+        episode: u64,
+        season: u64,
+    ) -> HashMap<String, String> {
+        let d = self.episode_points(title_id, episode, season);
+        let mut m = HashMap::new();
+        if let Some(videos) = d["videos"].as_array() {
+            for v in videos {
+                if let (Some(u), Some(q)) = (v["url"].as_str(), v["quality"].as_str()) {
+                    let q = q.trim();
+                    if !u.is_empty() && !q.is_empty() {
+                        m.entry(u.to_string()).or_insert_with(|| q.to_string());
+                    }
+                }
+            }
+        }
+        m
+    }
+
+    /// Bir embed adresinin (tau-video ise) SUNDUĞU EN YÜKSEK çözünürlük etiketi
+    /// ("1080p" gibi). tau değilse veya çözülemezse None — yani o kaynağın
+    /// çözünürlüğü ağdan ucuzca bilinemez (dood/Kaynak tek akış verir).
+    pub fn embed_max_quality(&self, embed_url: &str) -> Option<String> {
+        let (embed_id, vid) = parse_tau_embed(embed_url)?;
+        let mut url = format!("{TAU}/api/video/{embed_id}");
+        if !vid.is_empty() {
+            url.push_str(&format!("?vid={vid}"));
+        }
+        let d = self
+            .http
+            .get(&url)
+            .header("Accept", "application/json")
+            .timeout(6)
+            .send()
+            .ok()?
+            .json::<serde_json::Value>()
+            .ok()?;
+        let arr = d["urls"].as_array()?;
+        let mut best: Option<(u32, String)> = None;
+        for u in arr {
+            if let Some(l) = u["label"].as_str() {
+                if let Ok(n) = l.trim().trim_end_matches('p').trim().parse::<u32>() {
+                    if best.as_ref().map(|(bn, _)| n > *bn).unwrap_or(true) {
+                        best = Some((n, l.trim().to_string()));
+                    }
+                }
+            }
+        }
+        best.map(|(_, l)| l)
+    }
+    /// tau-video embed adresindeki tüm kalite seçeneklerini döner: `[("1080p", "http://..."), ("720p", "..."), ...]`.
+    pub fn embed_quality_list(&self, embed_url: &str) -> Vec<(String, String)> {
+        let Some((embed_id, vid)) = parse_tau_embed(embed_url) else {
+            return Vec::new();
+        };
+        let mut url = format!("{TAU}/api/video/{embed_id}");
+        if !vid.is_empty() {
+            url.push_str(&format!("?vid={vid}"));
+        }
+        let Ok(resp) = self
+            .http
+            .get(&url)
+            .header("Accept", "application/json")
+            .timeout(6)
+            .send()
+        else {
+            return Vec::new();
+        };
+        let Ok(d) = resp.json::<serde_json::Value>() else {
+            return Vec::new();
+        };
+        let Some(arr) = d["urls"].as_array() else {
+            return Vec::new();
+        };
+        let mut list = Vec::new();
+        for u in arr {
+            if let (Some(l), Some(uu)) = (u["label"].as_str(), u["url"].as_str()) {
+                let label = l.trim().to_string();
+                if !label.is_empty() && !uu.is_empty() {
+                    list.push((label, uu.to_string()));
+                }
+            }
+        }
+        list.sort_by(|a, b| {
+            let num_a = a.0.trim_end_matches('p').parse::<u32>().unwrap_or(0);
+            let num_b = b.0.trim_end_matches('p').parse::<u32>().unwrap_or(0);
+            num_b.cmp(&num_a)
+        });
+        list
     }
 
     pub fn list_fansubs(&self, title_id: u64, episode: u64, season: u64) -> Result<Vec<FansubInfo>, String> {
@@ -3087,7 +3272,8 @@ impl Client {
     }
 
     pub fn source_host_hint(url: &str) -> &'static str {
-        if url.contains("tau-video") { "tau-video" }
+        if url.starts_with('/') { "yerel" }
+        else if url.contains("tau-video") { "tau-video" }
         else if url.contains("sibnet.ru") { "sibnet.ru" }
         else if url.contains("streamtape") { "streamtape" }
         else if url.contains("vudeo") { "vudeo" }
@@ -3662,7 +3848,6 @@ mod tests {
         assert_eq!(back.title.meta_line(), "2000  •  Film");
     }
 
-    #[test]
     #[test]
     fn settings_source_patience_roundtrips() {
         let mut s = Settings::default();

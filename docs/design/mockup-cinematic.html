@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AnimeciX v2 — Konsept Mockup (Cinematic)</title>
+<style>
+  /* ===== Tokens: docs/design/netflix-cinematic.md (merged) ===== */
+  :root{
+    --bg:#0B0B0E; --bg-elev:#16161A; --card:#1D1D23;
+    --fg:#F2F2F2; --muted:#9A9AA3; --faint:#5D5D66;
+    --accent:#E23B3B; --accent-hover:#F25555; --success:#3FBF6C;
+    --radius-card:8px; --radius-btn:4px;
+    --dur-fast:.2s; --dur-base:.3s; --dur-slow:.5s;
+    --ease:cubic-bezier(.2,0,0,1);
+    --pad-rail:clamp(16px,4vw,64px);
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{color-scheme:dark}
+  body{background:var(--bg);color:var(--fg);
+    font:400 14px/1.5 Archivo,Inter,system-ui,sans-serif;
+    overflow-x:hidden}
+  button{font:inherit;cursor:pointer;border:0;background:none;color:inherit}
+  :focus-visible{outline:2px solid var(--fg);outline-offset:2px}
+
+  /* ===== Nav ===== */
+  nav{position:fixed;inset:0 0 auto;height:56px;z-index:100;display:flex;align-items:center;gap:28px;
+    padding:0 var(--pad-rail);
+    background:linear-gradient(#000C,transparent);
+    transition:background var(--dur-base) var(--ease)}
+  nav.solid{background:var(--bg)}
+  .logo{font:800 22px/1 Archivo,sans-serif;letter-spacing:-.02em;color:var(--accent)}
+  .navlinks{display:flex;gap:20px;font-size:13px;color:var(--muted)}
+  .navlinks a{color:inherit;text-decoration:none}
+  .navlinks a.active{color:var(--fg);font-weight:600}
+  .navright{margin-left:auto;display:flex;align-items:center;gap:18px;color:var(--muted)}
+  .avatar{width:28px;height:28px;border-radius:var(--radius-btn);
+    background:linear-gradient(135deg,var(--accent),#7b2430)}
+
+  /* ===== Billboard ===== */
+  .billboard{position:relative;height:min(72vh,720px);display:flex;align-items:flex-end;
+    padding:0 var(--pad-rail) clamp(120px,18vh,190px)}
+  .bb-art{position:absolute;inset:0;z-index:-1;
+    background:
+      radial-gradient(80% 90% at 78% 30%,#2c4a5e 0%,transparent 60%),
+      radial-gradient(70% 80% at 25% 70%,#40301e 0%,transparent 55%),
+      linear-gradient(200deg,#101a24 0%,#0b0b0e 70%)}
+  .bb-art::after{content:"";position:absolute;inset:0;
+    background:linear-gradient(90deg,var(--bg) 12%,transparent 55%),
+               linear-gradient(0deg,var(--bg) 4%,transparent 40%)}
+  .bb-content{max-width:520px;display:grid;gap:14px}
+  .bb-kicker{font-size:12px;font-weight:600;color:var(--accent);letter-spacing:.08em;text-transform:uppercase}
+  .bb-title{font-size:clamp(36px,5.4vw,64px);font-weight:800;letter-spacing:-.02em;line-height:1.05}
+  .bb-meta{font-size:13px;color:var(--muted)}
+  .bb-meta .ok{color:var(--success);font-weight:600}
+  .bb-desc{color:#cfced4;line-height:1.55;max-width:46ch}
+  .bb-actions{display:flex;gap:10px;margin-top:6px}
+  .btn{display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 26px;
+    border-radius:var(--radius-btn);font-weight:700;font-size:15px;
+    transition:transform var(--dur-fast),background var(--dur-fast),box-shadow var(--dur-fast)}
+  .btn:active{transform:scale(.97)}
+  .btn-play{background:var(--fg);color:#000}
+  .btn-play:hover{background:#fff;box-shadow:0 6px 24px #000a}
+  .btn-ghost{background:#5a5a5a55;color:var(--fg);backdrop-filter:blur(6px)}
+  .btn-ghost:hover{background:#5a5a5a99}
+
+  /* ===== Rails ===== */
+  main{position:relative;z-index:2;margin-top:-8vh;display:grid;gap:48px;padding-bottom:80px}
+  .rail h2{font-size:19px;font-weight:700;padding:0 var(--pad-rail) 12px;display:flex;align-items:center;gap:8px}
+  .rail h2 .all{margin-left:auto;font-size:12px;font-weight:600;color:transparent;transition:color var(--dur-fast)}
+  .rail:hover h2 .all{color:var(--muted)}
+  .track{display:flex;gap:8px;overflow-x:auto;scroll-behavior:smooth;
+    padding:30px calc(var(--pad-rail) - 12px);margin:-30px 0;scrollbar-width:none}
+  .track::-webkit-scrollbar{display:none}
+  .card{position:relative;flex:0 0 auto;border-radius:var(--radius-card);
+    transition:transform var(--dur-slow) var(--ease),box-shadow var(--dur-slow) var(--ease);
+    cursor:pointer}
+  .card .art{border-radius:var(--radius-card);overflow:hidden;aspect-ratio:16/9;
+    background:var(--card)}
+  .card.poster{width:160px}
+  .card.wide{width:264px}
+  .card .art div{width:100%;height:100%;display:flex;align-items:flex-end;padding:10px;
+    font:700 14px/1.15 Archivo,sans-serif;text-shadow:0 2px 8px #000;min-height:100%}
+  /* hover-expand (wide only, billboard-safe) */
+  .track.spread{align-items:center}
+  .card.wide:hover{transform:scale(1.38) translateY(-10px);z-index:50;
+    box-shadow:0 12px 40px rgba(0,0,0,.7);transition-delay:.3s;border-radius:calc(var(--radius-card) * .75)}
+  .card.wide:hover .panel{opacity:1;max-height:120px;transition-delay:.5s}
+  .panel{position:absolute;left:0;right:0;top:100%;background:var(--bg-elev);
+    border-radius:0 0 var(--radius-card) var(--radius-card);padding:12px 14px;
+    opacity:0;max-height:0;overflow:hidden;transition:opacity var(--dur-base),max-height var(--dur-base)}
+  .panel .row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .icon-btn{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;
+    border:1.5px solid var(--faint);color:var(--fg);font-size:13px;transition:border-color var(--dur-fast),background var(--dur-fast)}
+  .icon-btn:hover{border-color:var(--fg);background:#ffffff14}
+  .icon-btn.play{border:0;background:var(--fg);color:#000}
+  .panel .meta{font-size:11px;color:var(--muted);display:flex;gap:8px;align-items:center}
+  .tag{border-left:2px solid var(--faint);padding-left:5px}
+  .progress{height:3px;background:#ffffff2a;border-radius:2px;margin-top:8px}
+  .progress i{display:block;height:100%;background:var(--accent);border-radius:2px}
+  /* top10 */
+  .rank{position:absolute;left:-8px;bottom:6px;font:800 84px/1 Archivo,sans-serif;
+    color:transparent;-webkit-text-stroke:2px var(--muted);z-index:1;pointer-events:none}
+  /* continue */
+  .card.wide .watched{position:absolute;left:0;right:0;bottom:6px;height:3px;background:#ffffff2a}
+  .card.wide .watched i{display:block;height:100%;background:var(--accent)}
+  .chev{position:absolute;top:50%;transform:translateY(-50%);width:40px;height:64px;z-index:60;
+    background:#0b0b0ecc;color:var(--fg);font-size:22px;opacity:0;transition:opacity var(--dur-base)}
+  .rail:hover .chev{opacity:1}
+  .chev.l{left:calc(var(--pad-rail) / 2)}.chev.r{right:calc(var(--pad-rail) / 2)}
+  .rail{position:relative}
+
+  /* fake poster palettes */
+  .g1{background:linear-gradient(160deg,#31465a,#15202b)} .g2{background:linear-gradient(160deg,#5d3a3a,#241517)}
+  .g3{background:linear-gradient(160deg,#3f5344,#182119)} .g4{background:linear-gradient(160deg,#57432b,#221910)}
+  .g5{background:linear-gradient(160deg,#433c58,#1b1727)} .g6{background:linear-gradient(160deg,#2f4f55,#132426)}
+  .g7{background:linear-gradient(160deg,#5a4a63,#221b26)} .g8{background:linear-gradient(160deg,#505231,#222313)}
+
+  @media (max-width:640px){
+    .card.wide{width:220px}.card.poster{width:120px}
+    .card.wide:hover{transform:none}
+    .billboard{height:62vh}
+  }
+</style>
+</head>
+<body>
+
+<nav id="nav">
+  <span class="logo">ANİMECİX</span>
+  <div class="navlinks">
+    <a href="#" class="active">Ana Sayfa</a><a href="#">Keşfet</a><a href="#">Yayın Takvimi</a><a href="#">Listem</a>
+  </div>
+  <div class="navright">
+    <button aria-label="Ara">⌕</button><button aria-label="Bildirimler">🔔</button>
+    <span class="avatar"></span>
+  </div>
+</nav>
+
+<header class="billboard">
+  <div class="bb-art"></div>
+  <div class="bb-content">
+    <span class="bb-kicker">★ Senin için öne çıkan</span>
+    <h1 class="bb-title">Frieren: Büyücünün Yolculuğu</h1>
+    <div class="bb-meta"><span class="ok">%92 eşleşme</span> · 2024 · 2. Sezon · 28 bölüm · altyazılı</div>
+    <p class="bb-desc">Bin yıl yaşayan bir büyücü, yanındaki kahramanların ömrünün kendisi için ne kadar kısa olduğunu fark eder. Hüzünlü, sakin ve büyüleyici bir yolculuk hikâyesi.</p>
+    <div class="bb-actions">
+      <button class="btn btn-play">▶ &nbsp;Bölüm 5'i Oynat</button>
+      <button class="btn btn-ghost">＋ Listem</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="rail">
+    <h2>İzlemeye Devam Et <span class="all">Tümü ›</span></h2>
+    <button class="chev l" data-dir="-1">‹</button><button class="chev r" data-dir="1">›</button>
+    <div class="track" data-cards="continue"></div>
+  </section>
+
+  <section class="rail">
+    <h2>Bu Hafta Yeni Bölümler <span class="all">Tümü ›</span></h2>
+    <button class="chev l" data-dir="-1">‹</button><button class="chev r" data-dir="1">›</button>
+    <div class="track spread" data-cards="weekly"></div>
+  </section>
+
+  <section class="rail">
+    <h2>Türkiye'de Bugün İlk 10 <span class="all">Tümü ›</span></h2>
+    <div class="track" data-cards="top10" style="gap:26px"></div>
+  </section>
+
+  <section class="rail">
+    <h2>Sen izledin, bunlar da var <span class="all">Tümü ›</span></h2>
+    <button class="chev l" data-dir="-1">‹</button><button class="chev r" data-dir="1">›</button>
+    <div class="track" data-cards="posters"></div>
+  </section>
+</main>
+
+<script>
+const titles = {
+  continue:[["Kaiju No. 8",62,"B3"],["Hell's Paradise",24,"B7"],[" Sousou no Frieren",80,"B11"],["Kimetsu no Yaiba",35,"B1"],["Oshi no Ko",12,"B9"]],
+  weekly:[["Frieren",[40,45],8,92],["One Piece",[800,1120],12,88],["Sakamoto Days",[16,17],3,76],["Kaiju No.8",[10,12],11,81],["Dandadan",[8,9],6,90],["Blue Lock",[24,25],4,73],["Undead Unluck",[15,16],9,68],["Mashle",[12,13],5,64]],
+  top10:["Jujutsu Kaisen","One Piece","Frieren","Dandadan","Oshi no Ko","Kaiju No. 8","Sakamoto Days","Blue Lock","Chainsaw Man","Hell's Paradise"],
+  posters:["Vinland Saga","Vivy","Made in Abyss","Monster","Steins;Gate","Ping Pong","Ranking of Kings","Cyberpunk ED","Mob Psycho 100","Barakamon","March comes in","Yotsuba&!"]
+};
+const P = i=>`g${(i%8)+1}`;
+const el=(h)=>{const t=document.createElement('template');t.innerHTML=h.trim();return t.content.firstChild};
+
+document.querySelectorAll('.track').forEach(tr=>{
+  const kind=tr.dataset.cards;
+  if(kind==='continue') tr.innerHTML=titles.continue.map(([n,pct,b],i)=>`
+    <div class="card wide"><div class="art"><div class="${P(i)}">${n}</div></div>
+      <div class="watched"><i style="width:${pct}%"></i></div></div>`).join('');
+  if(kind==='weekly') tr.innerHTML=titles.weekly.map(([n,ep,idx,mt],i)=>`
+    <div class="card wide"><div class="art"><div class="${P(i)}">${n}</div></div>
+      <div class="panel"><div class="row">
+        <button class="icon-btn play">▶</button><button class="icon-btn">＋</button><button class="icon-btn">↧</button>
+      </div><div class="meta"><span class="ok" style="color:var(--success)">%${mt}</span><span class="tag">${ep[0]}–${ep[1]}. Bölümler</span><span class="tag">${idx}g önce</span></div></div></div>`).join('');
+  if(kind==='top10') tr.innerHTML=titles.top10.map((n,i)=>`
+    <div class="card poster" style="width:150px"><span class="rank">${i+1}</span>
+      <div class="art" style="aspect-ratio:2/3"><div class="${P(i+3)}">${n}</div></div></div>`).join('');
+  if(kind==='posters') tr.innerHTML=titles.posters.map((n,i)=>`
+    <div class="card poster" style="width:150px"><div class="art" style="aspect-ratio:2/3"><div class="${P(i+1)}">${n}</div></div></div>`).join('');
+});
+
+document.querySelectorAll('.chev').forEach(b=>b.onclick=()=>{
+  const t=b.parentElement.querySelector('.track');
+  t.scrollBy({left:b.dataset.dir*(t.clientWidth*.8),behavior:'smooth'});
+});
+addEventListener('scroll',()=>document.getElementById('nav').classList.toggle('solid',scrollY>40),{passive:true});
+</script>
+</body>
+</html>

@@ -72,6 +72,14 @@ publish_release() {
     echo "==> $asset bulunamadı, release atlanıyor."
     return 0
   fi
+  # Zorunlu imzalama: istemci tarafında doğrulama .sig asset'i olmadan güncellemeyi reddeder.
+  if [ ! -f "$asset.sig" ] || [ "$asset" -nt "$asset.sig" ]; then
+    echo "==> $asset imzalanıyor..."
+    bash "$(dirname "$0")/scripts/sign_update.sh" "$asset" || {
+      echo "==> İmzalama başarısız — release OLUŞTURULMADI (signed olmadan yayınlamayın)." >&2
+      return 1
+    }
+  fi
   echo "==> GitHub Release oluşturuluyor (v$VERSION)..."
   local resp
   resp=$(curl -sS -X POST \
@@ -94,6 +102,13 @@ publish_release() {
     -H "Content-Type: application/octet-stream" \
     --data-binary "@$asset" \
     "$upload_url?name=$asset&label=$asset" >/dev/null
+  echo "==> Asset yükleniyor: $asset.sig"
+  curl -sS -X POST \
+    -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.github+json" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@$asset.sig" \
+    "$upload_url?name=$asset.sig&label=$asset.sig" >/dev/null
   echo "==> Release yayınlandı: https://github.com/$repo/releases/tag/v$VERSION"
 }
 

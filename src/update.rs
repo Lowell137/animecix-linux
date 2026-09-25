@@ -8,6 +8,11 @@ use adw::prelude::*;
 use serde::Deserialize;
 const UPDATE_REPO: &str = "Lowell137/animecix-linux";
 const ASSET_NAME: &str = "AnimeciX-x86_64.AppImage";
+const ASSET_SIG_NAME: &str = "AnimeciX-x86_64.AppImage.sig";
+/// ECDSA P-256 public key (65 bayt, etiketlenmemiş SEC1 noktası).
+/// Özel anahtar: ~/.config/animecix-signing/update-sign-key.pem (scripts/sign_update.sh)
+const UPDATE_PUBKEY_HEX: &str = "0493184647bb33b6860ec6bc3eaae9988b32ea1d6b8a41202c350cd80d7d\
+b08c0fab92bc7f8081996f3fdf3da81f3dbfc749dc8019e76fb2c13f0f4eec27903af9";
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Deserialize)]
@@ -70,6 +75,52 @@ fn latest_release() -> Result<GithubRelease, String> {
     resp.json().map_err(|e| e.to_string())
 }
 
+fn hex_to_bytes(s: &str) -> Option<Vec<u8>> {
+    let s = s.trim();
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+/// `sig_b64`: dosyanın SHA-256 üzerinden atanmış ECDSA-P256 imzasının (ASN.1 DER) base64'u.
+pub fn verify_update_signature(pubkey_hex: &str, bytes: &[u8], sig_b64: &str) -> Result<(), String> {
+    use base64::Engine as _;
+    use ring::signature::{UnparsedPublicKey, ECDSA_P256_SHA256_ASN1};
+    let pubkey = hex_to_bytes(pubkey_hex).ok_or("gömülü public anahtar bozuk")?;
+    let sig = base64::engine::general_purpose::STANDARD
+        .decode(sig_b64.trim().as_bytes())
+        .map_err(|_| "imza dosyası base64 değil".to_string())?;
+    let key = UnparsedPublicKey::new(&ECDSA_P256_SHA256_ASN1, pubkey);
+    key.verify(bytes, &sig)
+        .map_err(|_| "İmza doğrulanamadı — indirilen dosya güvenilmez, güncelleme reddedildi.".into())
+}
+
+async fn fetch_bytes(
+    client: &reqwest::Client,
+    url: &str,
+    mut on_progress: Option<&mut dyn FnMut(u64, u64)>,
+) -> Result<Vec<u8>, String> {
+    let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("İndirme hatası: {}", resp.status()));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    let mut buf: Vec<u8> = Vec::with_capacity(total as usize);
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| e.to_string())?;
+        buf.extend_from_slice(&chunk);
+        if let Some(p) = on_progress.as_mut() {
+            p(buf.len() as u64, total);
+        }
+    }
+    Ok(buf)
+}
+
 pub fn replace_target(bytes: &[u8], target: &Path) -> Result<(), String> {
     if bytes.len() < 4 || &bytes[0..4] != b"\x7fELF" {
         return Err("İndirilen dosya geçerli bir AppImage değil".into());
@@ -118,34 +169,38 @@ pub fn replace_target(bytes: &[u8], target: &Path) -> Result<(), String> {
     Ok(())
 }
 
-pub fn download_update<F>(url: &str, target: &Path, mut on_progress: F) -> Result<(), String>
+pub fn download_update<F>(url: &str, sig_url: &str, target: &Path, on_progress: F) -> Result<(), String>
 where
     F: FnMut(u64, u64) + Send + 'static,
+{
+    download_update_with_key(url, sig_url, target, UPDATE_PUBKEY_HEX, on_progress)
+}
+
+fn download_update_with_key<F>(
+    url: &str,
+    sig_url: &str,
+    target: &Path,
+    pubkey_hex: &str,
+    mut on_progress: F,
+) -> Result<(), String>
+where
+    F: FnMut(u64, u64),
 {
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?;
-    let bytes = rt.block_on(async {
+    rt.block_on(async {
         let client = reqwest::Client::builder()
             .user_agent("animecix-updater")
             .build()
             .map_err(|e| e.to_string())?;
-        let resp = client.get(url).send().await.map_err(|e| e.to_string())?;
-        if !resp.status().is_success() {
-            return Err(format!("İndirme hatası: {}", resp.status()));
-        }
-        let total = resp.content_length().unwrap_or(0);
-        let mut buf: Vec<u8> = Vec::with_capacity(total as usize);
-        let mut stream = resp.bytes_stream();
-        while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| e.to_string())?;
-            buf.extend_from_slice(&chunk);
-            on_progress(buf.len() as u64, total);
-        }
-        Ok::<Vec<u8>, String>(buf)
-    })?;
-    replace_target(&bytes, target)
+        let sig_b64 = String::from_utf8(fetch_bytes(&client, sig_url, None).await?)
+            .map_err(|_| "imza dosyası metin değil".to_string())?;
+        let bytes = fetch_bytes(&client, url, Some(&mut on_progress)).await?;
+        verify_update_signature(pubkey_hex, &bytes, &sig_b64)?;
+        replace_target(&bytes, target)
+    })
 }
 
 pub fn check_and_prompt<W: IsA<gtk::Window> + Clone + 'static>(
@@ -159,9 +214,9 @@ pub fn check_and_prompt<W: IsA<gtk::Window> + Clone + 'static>(
         }
         return;
     }
-    let (tx, rx) = channel::<Result<Option<(String, String)>, String>>();
+    let (tx, rx) = channel::<Result<Option<(String, String, String)>, String>>();
     std::thread::spawn(move || {
-        let res = (|| -> Result<Option<(String, String)>, String> {
+        let res = (|| -> Result<Option<(String, String, String)>, String> {
             let rel = latest_release()?;
             if !needs_update(CURRENT_VERSION, &rel.tag_name) {
                 return Ok(None);
@@ -172,7 +227,13 @@ pub fn check_and_prompt<W: IsA<gtk::Window> + Clone + 'static>(
                 .find(|a| a.name == ASSET_NAME)
                 .map(|a| a.browser_download_url.clone())
                 .ok_or_else(|| "asset bulunamadı".to_string())?;
-            Ok(Some((rel.tag_name, url)))
+            let sig_url = rel
+                .assets
+                .iter()
+                .find(|a| a.name == ASSET_SIG_NAME)
+                .map(|a| a.browser_download_url.clone())
+                .ok_or_else(|| "imza asset'i ({}.sig) bulunamadı".to_string())?;
+            Ok(Some((rel.tag_name, url, sig_url)))
         })();
         let _ = tx.send(res);
     });
@@ -180,8 +241,8 @@ pub fn check_and_prompt<W: IsA<gtk::Window> + Clone + 'static>(
     let win = window.clone();
     let mut on_suppress = Some(on_suppress_uptodate);
     glib::idle_add_local(move || match rx.try_recv() {
-        Ok(Ok(Some((tag, url)))) => {
-            present_update_dialog(win.clone(), &tag, &url);
+        Ok(Ok(Some((tag, url, sig_url)))) => {
+            present_update_dialog(win.clone(), &tag, &url, &sig_url);
             ControlFlow::Break
         }
         Ok(Ok(None)) => {
@@ -213,7 +274,7 @@ fn present_info<W: IsA<gtk::Window>>(window: &W, heading: &str, body: &str) {
 fn present_uptodate<W: IsA<gtk::Window>>(window: &W, on_suppress: impl Fn() + 'static) {
     let dialog = adw::MessageDialog::builder()
         .heading("Güncel")
-        .body("AnimeciX güncel sürümde 🎉")
+        .body("AnimeciX güncel sürümde")
         .close_response("ok")
         .default_response("ok")
         .build();
@@ -238,9 +299,10 @@ enum UpdMsg {
     Error(String),
 }
 
-fn present_update_dialog<W: IsA<gtk::Window> + Clone + 'static>(window: W, tag: &str, url: &str) {
+fn present_update_dialog<W: IsA<gtk::Window> + Clone + 'static>(window: W, tag: &str, url: &str, sig_url: &str) {
     let tag = tag.trim_start_matches('v').to_string();
     let url = url.to_string();
+    let sig_url = sig_url.to_string();
     let target = std::env::var("APPIMAGE").unwrap_or_default();
     if target.is_empty() {
         present_info(&window, "Güncelleme Başarısız", "AppImage yolu bulunamadı.");
@@ -261,13 +323,13 @@ fn present_update_dialog<W: IsA<gtk::Window> + Clone + 'static>(window: W, tag: 
     dialog.connect_response(None, move |dlg, resp| {
         if resp == "update" {
             dlg.close();
-            run_update_with_progress(window.clone(), &url, &target);
+            run_update_with_progress(window.clone(), &url, &sig_url, &target);
         }
     });
     dialog.present();
 }
 
-fn run_update_with_progress<W: IsA<gtk::Window> + Clone + 'static>(window: W, url: &str, target: &str) {
+fn run_update_with_progress<W: IsA<gtk::Window> + Clone + 'static>(window: W, url: &str, sig_url: &str, target: &str) {
     let dlg = adw::Window::builder()
         .title("Güncelleniyor")
         .modal(true)
@@ -291,8 +353,9 @@ fn run_update_with_progress<W: IsA<gtk::Window> + Clone + 'static>(window: W, ur
     dlg.present();
 
     let url = url.to_string();
+    let sig_url = sig_url.to_string();
     let target = target.to_string();
-    start_update_worker(&dlg, &label, &bar, &window, &url, &target);
+    start_update_worker(&dlg, &label, &bar, &window, &url, &sig_url, &target);
 }
 
 fn start_update_worker<W: IsA<gtk::Window> + Clone + 'static>(
@@ -301,15 +364,17 @@ fn start_update_worker<W: IsA<gtk::Window> + Clone + 'static>(
     bar: &gtk::ProgressBar,
     window: &W,
     url: &str,
+    sig_url: &str,
     target: &str,
 ) {
     let (tx, rx) = channel::<UpdMsg>();
     let prog_tx = tx.clone();
     let url_s = url.to_string();
+    let sig_s = sig_url.to_string();
     let target_path = std::path::PathBuf::from(target);
     std::thread::spawn(move || {
         let _ = tx.send(UpdMsg::Step("İndiriliyor…".into()));
-        let result = download_update(&url_s, &target_path, move |cur, total| {
+        let result = download_update(&url_s, &sig_s, &target_path, move |cur, total| {
             let _ = prog_tx.send(UpdMsg::Progress(cur, total));
         });
         match result {
@@ -328,6 +393,7 @@ fn start_update_worker<W: IsA<gtk::Window> + Clone + 'static>(
     let bar = bar.clone();
     let window = window.clone();
     let url_c = url.to_string();
+    let sig_c = sig_url.to_string();
     let target_c = target.to_string();
     glib::idle_add_local(move || {
         match rx.try_recv() {
@@ -363,10 +429,11 @@ fn start_update_worker<W: IsA<gtk::Window> + Clone + 'static>(
                     let dlg2 = dlg.clone();
                     let win2 = window.clone();
                     let url2 = url_c.clone();
+                    let sig2 = sig_c.clone();
                     let target2 = target_c.clone();
                     retry.connect_clicked(move |_| {
                         dlg2.close();
-                        run_update_with_progress(win2.clone(), &url2, &target2);
+                        run_update_with_progress(win2.clone(), &url2, &sig2, &target2);
                     });
                     b.append(&retry);
 
@@ -426,28 +493,35 @@ mod tests {
     fn download_update_writes_target_and_reports_progress() {
         use std::io::{Read, Write};
         let elf = b"\x7fELF-appimage-govde-icerigi-burada-1234567890";
+        let (sig_b64, pubkey_hex) = sign_fixture(elf);
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         std::thread::spawn(move || {
-            for stream in listener.incoming().take(1) {
+            for stream in listener.incoming().take(2) {
                 let mut s = stream.unwrap();
                 let mut buf = [0u8; 4096];
-                let _ = s.read(&mut buf); // istemci isteğini oku
+                let n = s.read(&mut buf).unwrap(); // istemci isteğini oku
+                let body = if String::from_utf8_lossy(&buf[..n]).contains("GET /sig") {
+                    sig_b64.clone().into_bytes()
+                } else {
+                    elf.to_vec()
+                };
                 let resp = format!(
                     "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
-                    elf.len()
+                    body.len()
                 );
                 s.write_all(resp.as_bytes()).unwrap();
-                s.write_all(elf).unwrap();
+                s.write_all(&body).unwrap();
                 s.flush().unwrap();
             }
         });
         let url = format!("http://127.0.0.1:{}/AnimeciX-x86_64.AppImage", port);
+        let sig_url = format!("http://127.0.0.1:{}/sig", port);
         let target = std::env::temp_dir().join(format!("animecix-dl-test-{}.AppImage", std::process::id()));
         let _ = std::fs::remove_file(&target);
         let progress = std::sync::Arc::new(std::sync::Mutex::new((0u64, 0u64)));
         let prog = progress.clone();
-        let r = download_update(&url, &target, move |cur, total| {
+        let r = download_update_with_key(&url, &sig_url, &target, &pubkey_hex, move |cur, total| {
             *prog.lock().unwrap() = (cur, total);
         });
         assert!(r.is_ok(), "indirme başarısız: {:?}", r.err());
@@ -460,11 +534,76 @@ mod tests {
     }
 
     #[test]
+    fn download_update_rejects_tampered_bytes() {
+        use std::io::{Read, Write};
+        let elf = b"\x7fELF-appimage-govde-icerigi-burada-1234567890";
+        let (sig_b64, pubkey_hex) = sign_fixture(elf);
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().take(2) {
+                let mut s = stream.unwrap();
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap();
+                let body = if String::from_utf8_lossy(&buf[..n]).contains("GET /sig") {
+                    sig_b64.clone().into_bytes()
+                } else {
+                    b"\x7fELF-kotu-niyetli-sahte-govde!".to_vec()
+                };
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nContent-Type: application/octet-stream\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                s.write_all(resp.as_bytes()).unwrap();
+                s.write_all(&body).unwrap();
+                s.flush().unwrap();
+            }
+        });
+        let url = format!("http://127.0.0.1:{}/AnimeciX-x86_64.AppImage", port);
+        let sig_url = format!("http://127.0.0.1:{}/sig", port);
+        let target = std::env::temp_dir().join(format!("animecix-dl-tamper-{}.AppImage", std::process::id()));
+        let _ = std::fs::remove_file(&target);
+        let r = download_update_with_key(&url, &sig_url, &target, &pubkey_hex, |_, _| {});
+        assert!(r.is_err(), "tahrif edilmiş dosya reddedilmeli");
+        assert!(!target.exists(), "reddedilen dosya hedefe yazılmamalı");
+    }
+
+    #[test]
     fn download_update_fails_on_unreachable() {
         let target = std::env::temp_dir().join(format!("animecix-dl-fail-{}.AppImage", std::process::id()));
         let _ = std::fs::remove_file(&target);
-        let r = download_update("http://127.0.0.1:1/nope", &target, |_, _| {});
+        let r = download_update("http://127.0.0.1:1/nope", "http://127.0.0.1:1/sig", &target, |_, _| {});
         assert!(r.is_err(), "erişilemeyen adres başarısız olmalı");
         std::fs::remove_file(&target).ok();
+    }
+
+    /// Test anahtarı (yalnızca test amaçlı sabit çift), `data`yı imzalar → (base64 imza, hex public anahtar).
+    fn sign_fixture(data: &[u8]) -> (String, String) {
+        use base64::Engine as _;
+        const TEST_PRIV_PKCS8_HEX: &str = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420e36483ff9823128c21bfde41f2998e92a7de3d828b3bcfdd603ebbf0f0ccf210a144034200048bd79a5f37b042e053f74876f886f567519daba402527089b1ab229afc8d16d4da2b92a01a722fb18443565c9158122531ca0c83d4cd97c7cca282be72a7a6c1";
+        const TEST_PUB_HEX: &str = "048bd79a5f37b042e053f74876f886f567519daba402527089b1ab229afc8d16d4da2b92a01a722fb18443565c9158122531ca0c83d4cd97c7cca282be72a7a6c1";
+        let rng = ring::rand::SystemRandom::new();
+        let pkcs8 = hex_to_bytes(TEST_PRIV_PKCS8_HEX).unwrap();
+        let pair = ring::signature::EcdsaKeyPair::from_pkcs8(
+            &ring::signature::ECDSA_P256_SHA256_ASN1_SIGNING,
+            &pkcs8,
+            &rng,
+        )
+        .unwrap();
+        let sig = pair.sign(&rng, data).unwrap();
+        (
+            base64::engine::general_purpose::STANDARD.encode(sig.as_ref()),
+            TEST_PUB_HEX.to_string(),
+        )
+    }
+
+    #[test]
+    fn verify_update_signature_accepts_valid_and_rejects_tampered() {
+        let data = b"\x7fELF-icerik";
+        let (sig, pubkey_hex) = sign_fixture(data);
+        assert!(verify_update_signature(&pubkey_hex, data, &sig).is_ok());
+        assert!(verify_update_signature(&pubkey_hex, b"\x7fELF-baska-icerik", &sig).is_err());
+        assert!(verify_update_signature(&pubkey_hex, data, "not-base64!!").is_err());
+        assert!(verify_update_signature("zz", data, &sig).is_err());
     }
 }

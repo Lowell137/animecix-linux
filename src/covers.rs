@@ -40,16 +40,19 @@ pub fn new_sized_picture(w: i32, h: i32) -> gtk::Picture {
     pic.set_can_shrink(true);
     pic.set_content_fit(gtk::ContentFit::Cover);
 
-    let size_class = match w {
-        0..=60 => "cover-thumb",
-        61..=130 => "cover-header",
-        131..=150 => "cover-shelf",
-        _ => "cover-movie-header",
-    };
-
     ensure_size_provider(w, h);
     let fixed_class = format!("cover-fixed-{w}-{h}");
-    pic.set_css_classes(&["cover", size_class, &fixed_class]);
+    if h >= w {
+        let size_class = match w {
+            0..=60 => "cover-thumb",
+            61..=130 => "cover-header",
+            131..=150 => "cover-shelf",
+            _ => "cover-movie-header",
+        };
+        pic.set_css_classes(&["cover", size_class, &fixed_class]);
+    } else {
+        pic.set_css_classes(&["cover", &fixed_class]);
+    }
     pic
 }
 
@@ -85,6 +88,23 @@ impl CoverManager {
     pub fn cover_picture(&self, url: Option<&str>, w: i32, h: i32) -> gtk::Picture {
         let pic = new_sized_picture(w, h);
         self.load_cover(url, &pic, w, h);
+        pic
+    }
+
+    /// Geniş kartlar (bölüm ızgarası) için yüksek çözünürlüklü kapak. TMDB
+    /// görselini w500'den çekip dokuyu düzen boyutunun 2 katı (w*2, h*2)
+    /// olarak pişiririz: akış kutusu kartı hücreye gerdiğinde (~240→~300px)
+    /// bile kaynak yukarı ölçeklenmez, keskin kalır. Widget'ın doğal boyu
+    /// yine set_size_request ile (w,h)'te sabit — sütun sayısı şişmez.
+    pub fn cover_picture_hd(&self, url: Option<&str>, w: i32, h: i32) -> gtk::Picture {
+        let pic = new_sized_picture(w, h);
+        if let Some(url) = url {
+            let big = url
+                .replace("image.tmdb.org/t/p/original", "image.tmdb.org/t/p/w500")
+                .replace("image.tmdb.org/t/p/w342", "image.tmdb.org/t/p/w500")
+                .replace("image.tmdb.org/t/p/w185", "image.tmdb.org/t/p/w500");
+            self.load_cover_impl(&big, &pic, w * 2, h * 2);
+        }
         pic
     }
 
@@ -163,6 +183,85 @@ impl CoverManager {
         // Hedef küçükse köşede kalmasın diye ortaya yerleştirilemez
         // (texture tam boyutta) — boyutlar zaten hedefe eşit.
         Some(gtk::gdk::Texture::for_pixbuf(&cropped))
+    }
+
+    /// Görseli tam daire şeklinde kırparak (köşeleri şeffaf yaparak) Texture döner.
+    pub fn scale_texture_circular(bytes: &[u8], size: i32) -> Option<gtk::gdk::Texture> {
+        let loader = gdk_pixbuf::PixbufLoader::new();
+        loader.write(bytes).ok()?;
+        loader.close().ok()?;
+        let src = loader.pixbuf()?;
+        let size = size.max(1);
+        let (sw, sh) = (src.width() as f64, src.height() as f64);
+        if sw <= 0.0 || sh <= 0.0 {
+            return None;
+        }
+        let scale = (size as f64 / sw).max(size as f64 / sh);
+        let dw = (sw * scale).ceil() as i32;
+        let dh = (sh * scale).ceil() as i32;
+        let big = src.scale_simple(dw.max(1), dh.max(1), gdk_pixbuf::InterpType::Bilinear)?;
+        let x = ((dw - size) / 2).max(0);
+        let y = ((dh - size) / 2).max(0);
+        let cropped = big.new_subpixbuf(x, y, size, size);
+        let with_alpha = if cropped.has_alpha() {
+            cropped
+        } else {
+            cropped.add_alpha(false, 0, 0, 0).ok()?
+        };
+
+        let pixels = with_alpha.read_pixel_bytes();
+        let slice = pixels.as_ref();
+        let stride = with_alpha.rowstride() as usize;
+        let n_channels = with_alpha.n_channels() as usize;
+        let mut out = vec![0u8; (size * size * 4) as usize];
+        let center = size as f64 / 2.0;
+        let radius = size as f64 / 2.0;
+
+        for py in 0..size {
+            for px in 0..size {
+                let out_idx = ((py * size + px) * 4) as usize;
+                let dx = px as f64 - center + 0.5;
+                let dy = py as f64 - center + 0.5;
+                let dist = (dx * dx + dy * dy).sqrt();
+
+                let src_idx = py as usize * stride + px as usize * n_channels;
+                let r = slice[src_idx];
+                let g = slice[src_idx + 1];
+                let b = slice[src_idx + 2];
+                let a = if n_channels == 4 { slice[src_idx + 3] } else { 255 };
+
+                let final_a = if dist > radius {
+                    0
+                } else if dist > radius - 1.0 {
+                    ((a as f64) * (radius - dist)) as u8
+                } else {
+                    a
+                };
+                if final_a == 0 {
+                    out[out_idx] = 0;
+                    out[out_idx + 1] = 0;
+                    out[out_idx + 2] = 0;
+                    out[out_idx + 3] = 0;
+                } else {
+                    out[out_idx] = r;
+                    out[out_idx + 1] = g;
+                    out[out_idx + 2] = b;
+                    out[out_idx + 3] = final_a;
+                }
+            }
+        }
+
+        let glib_bytes = glib::Bytes::from_owned(out);
+        let circular_pb = gdk_pixbuf::Pixbuf::from_bytes(
+            &glib_bytes,
+            gdk_pixbuf::Colorspace::Rgb,
+            true,
+            8,
+            size,
+            size,
+            size * 4,
+        );
+        Some(gtk::gdk::Texture::for_pixbuf(&circular_pb))
     }
 
     fn pump_covers(&self) {

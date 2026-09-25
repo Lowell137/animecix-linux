@@ -23,6 +23,8 @@ pub struct User {
     pub name: String,
     pub email: String,
     pub avatar: Option<String>,
+    pub background: Option<String>,
+    pub about: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -119,6 +121,8 @@ fn parse_user(v: &serde_json::Value) -> Option<User> {
             .as_str()
             .or_else(|| d["avatar_url"].as_str())
             .map(|s| s.to_string()),
+        background: d["background"].as_str().map(|s| s.to_string()),
+        about: d["about"].as_str().map(|s| s.to_string()),
     })
 }
 
@@ -587,7 +591,127 @@ impl Client {
         self.list_item(id, "remove", title_id)
     }
 
-    /// Sunucu watchlist'ini yerel favorilerle birleştir (site → cihaz).
+    /// Kullanıcının beğendiği listeler.
+    pub fn liked_lists(&self) -> Result<Vec<serde_json::Value>, String> {
+        let v: serde_json::Value = self.authed_get_json("lists/liked")?;
+        let items = v["pagination"]["data"]
+            .as_array()
+            .or_else(|| v["data"].as_array())
+            .cloned()
+            .unwrap_or_default();
+        Ok(items)
+    }
+
+    /// Kullanıcının tam profil bilgisi (banner/background dahil).
+    pub fn fetch_user_details(&self, uid: u64) -> Result<User, String> {
+        let v: serde_json::Value = self.authed_get_json(&format!("users/{uid}"))?;
+        let u = parse_user(&v).ok_or_else(|| "Kullanıcı ayrıştırılamadı".to_string())?;
+        if let Ok(mut s) = self.session.lock() {
+            s.user = Some(u.clone());
+            s.save();
+        }
+        Ok(u)
+    }
+
+    /// Avatar yükleme (multipart/form-data POST /secure/users/{uid}/avatar)
+    pub fn upload_avatar(&self, uid: u64, bytes: Vec<u8>, filename: &str) -> Result<String, String> {
+        let (cookie, xsrf) = self
+            .session
+            .lock()
+            .map(|s| (s.cookie_header(), s.xsrf().unwrap_or_default()))
+            .map_err(|e| e.to_string())?;
+        if cookie.is_empty() {
+            return Err("Giriş yapılmamış".into());
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+        let mime = if filename.to_lowercase().ends_with(".png") {
+            "image/png"
+        } else if filename.to_lowercase().ends_with(".webp") {
+            "image/webp"
+        } else {
+            "image/jpeg"
+        };
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(format!("Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n").as_bytes());
+        body.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+        body.extend_from_slice(&bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+        let resp = client
+            .post(format!("{BASE}/secure/users/{uid}/avatar"))
+            .header("Cookie", &cookie)
+            .header("X-XSRF-TOKEN", &xsrf)
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Accept", "application/json")
+            .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
+            .body(body)
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        let url = v["user"]["avatar"].as_str().ok_or_else(|| err_msg(&v))?.to_string();
+        if let Ok(mut s) = self.session.lock() {
+            if let Some(ref mut u) = s.user {
+                u.avatar = Some(url.clone());
+            }
+            s.save();
+        }
+        Ok(url)
+    }
+
+    /// Banner/Arka plan yükleme (multipart/form-data POST /secure/users/{uid}/background)
+    pub fn upload_background(&self, uid: u64, bytes: Vec<u8>, filename: &str) -> Result<String, String> {
+        let (cookie, xsrf) = self
+            .session
+            .lock()
+            .map(|s| (s.cookie_header(), s.xsrf().unwrap_or_default()))
+            .map_err(|e| e.to_string())?;
+        if cookie.is_empty() {
+            return Err("Giriş yapılmamış".into());
+        }
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW";
+        let mime = if filename.to_lowercase().ends_with(".png") {
+            "image/png"
+        } else if filename.to_lowercase().ends_with(".webp") {
+            "image/webp"
+        } else {
+            "image/jpeg"
+        };
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{boundary}\r\n").as_bytes());
+        body.extend_from_slice(format!("Content-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\n").as_bytes());
+        body.extend_from_slice(format!("Content-Type: {mime}\r\n\r\n").as_bytes());
+        body.extend_from_slice(&bytes);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+        let resp = client
+            .post(format!("{BASE}/secure/users/{uid}/background"))
+            .header("Cookie", &cookie)
+            .header("X-XSRF-TOKEN", &xsrf)
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Accept", "application/json")
+            .header("Content-Type", format!("multipart/form-data; boundary={boundary}"))
+            .body(body)
+            .send()
+            .map_err(|e| e.to_string())?;
+        let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+        let url = v["user"]["background"].as_str().ok_or_else(|| err_msg(&v))?.to_string();
+        if let Ok(mut s) = self.session.lock() {
+            if let Some(ref mut u) = s.user {
+                u.background = Some(url.clone());
+            }
+            s.save();
+        }
+        Ok(url)
+    }
     /// Yeni eklenen sayısını döner.
     pub fn merge_server_favs(&self) -> usize {
         if !self.is_logged_in() {

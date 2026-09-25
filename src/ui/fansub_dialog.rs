@@ -64,11 +64,10 @@ pub fn show_fansub_dialog(
         hbox.append(&name_lbl);
 
         if fs.rating > 0.0 {
-            let stars = format!("★ {:.1}", fs.rating);
-            let pts_lbl = gtk::Label::new(Some(&stars));
-            pts_lbl.add_css_class("accent");
-            pts_lbl.set_xalign(0.5);
-            hbox.append(&pts_lbl);
+            let (stars, _, _) =
+                crate::ui::components::status_label("starred-symbolic", &format!("{:.1}", fs.rating));
+            stars.add_css_class("accent");
+            hbox.append(&stars);
         }
 
         if !fs.approved_only {

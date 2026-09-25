@@ -153,6 +153,7 @@ fn main() {
 
             let theme = gtk::IconTheme::for_display(&display);
             theme.add_search_path(base.join("assets"));
+            theme.add_search_path(base.join("assets/hicolor"));
             theme.add_search_path(base.join("usr/share/icons"));
 
             let css = gtk::CssProvider::new();
@@ -183,6 +184,13 @@ fn main() {
                 /* === Yan menü satırları === */
                 .side-row {
                     border-radius: 10px;
+                    font-weight: 450;
+                }
+                .side-row label {
+                    font-weight: 450;
+                }
+                .sidebar-avatar {
+                    border-radius: 12px;
                 }
                 .side-selected {
                     background-color: alpha(currentColor, 0.13);
@@ -274,13 +282,27 @@ fn main() {
                     border-radius: 12px;
                 }
 
-                /* === Dizi Detay Kartı === */
+                /* === Dizi Detay Başlığı: çerçevesiz, arka plan üstünde çıplak === */
                 .title-detail-card {
-                    background-color: alpha(currentColor, 0.04);
-                    border: 1px solid alpha(currentColor, 0.08);
-                    border-radius: 14px;
-                    padding: 14px;
-                    transition: background-color 150ms ease;
+                    background: none;
+                    border: none;
+                    box-shadow: none;
+                    padding: 0;
+                }
+                .detail-poster {
+                    border-radius: 12px;
+                }
+
+                /* === Buzlu cam: gradyanın üstünde yumuşak, sınırsız yarı saydam yüzey ===
+                   GTK4 backdrop-filter desteklemez; buğulu cam hissi, altındaki
+                   gradyanın sızdığı yarı saydam yüzey + iç parlama ile verilir.
+                   Sert çerçeve çizgisi YOK (kullanıcı şikâyeti). */
+                .frosted {
+                    background-color: alpha(currentColor, 0.03);
+                    border: none;
+                    border-radius: 16px;
+                    box-shadow: inset 0 1px 0 alpha(#ffffff, 0.06),
+                                inset 0 0 24px alpha(currentColor, 0.04);
                 }
 
                 /* === Detay görünümü bilgi rozetleri (süre / bölüm / yayın) === */
@@ -291,6 +313,58 @@ fn main() {
                     padding: 3px 12px;
                     color: alpha(currentColor, 0.75);
                     font-size: 0.85em;
+                }
+
+                /* === Puan rozeti (detay başlığı) === */
+                .rating-pill {
+                    background-color: alpha(#f5c211, 0.16);
+                    border: 1px solid alpha(#f5c211, 0.4);
+                    border-radius: 999px;
+                    padding: 2px 11px;
+                    color: #f5c211;
+                    font-size: 0.85em;
+                    font-weight: 700;
+                }
+
+                /* === Bölüm ızgara kartları (Kitsune: bilgi banner içinde) === */
+                .episode-card {
+                    border-radius: 12px;
+                }
+                /* Hover parlaması banner'ın kendisine (scrim) uygulanır;
+                   kart kutusu Clamp yüzünden banner'dan geniş olduğundan
+                   parlama hücreye yayılıp bannerla hizalanmıyordu. */
+                .episode-cover {
+                    border-radius: 12px;
+                    transition: box-shadow 180ms ease;
+                }
+                .episode-cover:hover {
+                    box-shadow: 0 0 0 2px alpha(@accent_bg_color, 0.9),
+                                0 8px 20px alpha(#000000, 0.5);
+                }
+                .episode-blur {
+                    filter: blur(7px);
+                }
+                .episode-overlay {
+                    background: linear-gradient(to top,
+                        alpha(#000000, 0.92) 0%,
+                        alpha(#000000, 0.72) 32%,
+                        alpha(#000000, 0.25) 55%,
+                        transparent 74%);
+                    border-radius: 12px;
+                }
+                .ep-overlay-text {
+                    color: #ffffff;
+                    text-shadow: 0 1px 3px alpha(#000000, 0.9);
+                }
+                .ep-dim {
+                    background-color: alpha(#000000, 0.55);
+                    border-radius: 12px;
+                }
+                .ep-check {
+                    color: @accent_color;
+                    background-color: alpha(#000000, 0.6);
+                    border-radius: 999px;
+                    padding: 3px;
                 }
 
                 /* === Tek Seferlik İpucu Kartı === */
@@ -333,9 +407,19 @@ fn main() {
                     padding: 2px;
                 }
 
+                /* === Daraltılmış sidebar satırları: dolguyu sıfırla === */
+                .side-dock {
+                    min-width: 0px;
+                    padding-left: 2px;
+                    padding-right: 2px;
+                    padding-top: 4px;
+                    padding-bottom: 4px;
+                }
+
                 /* === Dock alt yazıları === */
                 .side-caption {
-                    font-size: 0.65em;
+                    font-size: 0.74em;
+                    font-weight: 400;
                     color: alpha(currentColor, 0.65);
                 }
 
@@ -537,6 +621,7 @@ fn main() {
                 /* === Durum Renkleri === */
                 .success { color: #2ec27e; font-weight: bold; }
                 .error   { color: #e01b24; font-weight: bold; }
+                .warn    { color: #f5c211; font-weight: bold; }
 
                 /* === Bölüm Progress Bar === */
                 .episode-progress {
@@ -551,12 +636,92 @@ fn main() {
                 .episode-progress progress {
                     border-radius: 3px;
                     background-color: @accent_color;
+                }
+
+
+                /* === Profil Banner & Avatar === */
+                .profile-header-card {
+                    border-radius: 16px;
+                    background-color: transparent;
+                    background: transparent;
+                    box-shadow: none;
+                    border: none;
+                }
+                .profile-banner-pic,
+                .profile-banner-pic image,
+                .profile-banner-pic > * {
+                    border-radius: 16px;
+                }
+                .profile-avatar-circle,
+                .profile-avatar-circle image,
+                .profile-avatar-circle > * {
+                    border-radius: 48px;
+                    background: transparent;
+                    background-color: transparent;
+                    box-shadow: none;
+                    border: none;
+                }
+                .profile-avatar-ring {
+                    border-radius: 52px;
+                    padding: 4px;
+                    background-color: rgba(20, 20, 24, 0.95);
+                    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.7);
+                }
+                .avatar-overlay-box {
+                    border-radius: 52px;
+                    background: transparent;
+                    background-color: transparent;
+                    border: none;
+                    box-shadow: none;
+                }
+
+                /* === Uygulama İçi Ayarlar Popup Kartı === */
+                .settings-scrim,
+                button.settings-scrim {
+                    background-color: rgba(0, 0, 0, 0.72);
+                    border: none;
+                    border-radius: 0;
+                    box-shadow: none;
+                    outline: none;
+                    padding: 0;
+                }
+                .settings-scrim:hover,
+                .settings-scrim:active,
+                button.settings-scrim:hover,
+                button.settings-scrim:active {
+                    background-color: rgba(0, 0, 0, 0.72);
+                    border: none;
+                    box-shadow: none;
+                }
+                .settings-card {
+                    background-color: #1a1a1e;
+                    border-radius: 18px;
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.85);
+                }
+                .settings-close-btn {
+                    background-color: rgba(255, 255, 255, 0.08);
+                    min-width: 28px;
+                    min-height: 28px;
+                    padding: 0;
+                    border-radius: 14px;
+                    color: rgba(255, 255, 255, 0.8);
+                    border: none;
+                    box-shadow: none;
+                }
+                .settings-close-btn:hover {
+                    background-color: rgba(255, 255, 255, 0.16);
+                    color: white;
+                }
+                .settings-sep {
+                    background-color: rgba(255, 255, 255, 0.06);
+                    min-height: 1px;
                 }"#,
             );
             gtk::style_context_add_provider_for_display(
                 &display,
                 &css,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                gtk::STYLE_PROVIDER_PRIORITY_USER,
             );
 
         }
