@@ -538,7 +538,7 @@ impl App {
             gtk::style_context_add_provider_for_display(
                 &display,
                 &accent_prov,
-                gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                gtk::STYLE_PROVIDER_PRIORITY_USER,
             );
         }
 
@@ -3540,33 +3540,23 @@ impl App {
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
+        // Adw.Dialog bu başlık çubuğuna native kapatma düğmesini otomatik ekler.
+        let titlebar = adw::HeaderBar::new();
+        let title = adw::WindowTitle::new("Ara", "");
+        titlebar.set_title_widget(Some(&title));
+        root.append(&titlebar);
+
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        header.set_margin_top(12);
-        header.set_margin_bottom(10);
-        header.set_margin_start(14);
-        header.set_margin_end(14);
+        header.set_margin_top(0);
+        header.set_margin_bottom(12);
+        header.set_margin_start(12);
+        header.set_margin_end(12);
 
         let entry = gtk::SearchEntry::new();
         entry.set_placeholder_text(Some("Anime veya dizi ara…"));
         entry.set_hexpand(true);
         header.append(&entry);
-
-        let close_btn = gtk::Button::from_icon_name("window-close-symbolic");
-        close_btn.add_css_class("flat");
-        close_btn.add_css_class("circular");
-        close_btn.set_valign(gtk::Align::Center);
-        close_btn.set_tooltip_text(Some("Kapat (Esc)"));
-        let dlg_close = dlg.downgrade();
-        close_btn.connect_clicked(move |_| {
-            if let Some(d) = dlg_close.upgrade() {
-                d.close();
-            }
-        });
-        header.append(&close_btn);
         root.append(&header);
-
-        let sep = gtk::Separator::new(gtk::Orientation::Horizontal);
-        root.append(&sep);
 
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hexpand(true);

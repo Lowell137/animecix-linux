@@ -39,6 +39,8 @@ fn ensure_sidebar_icon() {
     const COLLAPSED_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-sidebar-collapse-symbolic.svg");
     const NEWS_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-news-symbolic.svg");
     const SEARCH_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-search-symbolic.svg");
+    const SEEK_BACK_SVG: &str = include_str!("../assets/hicolor/scalable/actions/seek-backward-10-symbolic.svg");
+    const SEEK_FORWARD_SVG: &str = include_str!("../assets/hicolor/scalable/actions/seek-forward-10-symbolic.svg");
     let dark = adw::StyleManager::default().is_dark();
     let fill = if dark { "#e8e8e8" } else { "#222222" };
     let home = std::env::var("HOME").unwrap_or_default();
@@ -52,6 +54,8 @@ fn ensure_sidebar_icon() {
         ("animecix-sidebar-collapse-symbolic.svg", COLLAPSED_SVG),
         ("animecix-news-symbolic.svg", NEWS_SVG),
         ("animecix-search-symbolic.svg", SEARCH_SVG),
+        ("seek-backward-10-symbolic.svg", SEEK_BACK_SVG),
+        ("seek-forward-10-symbolic.svg", SEEK_FORWARD_SVG),
     ] {
         let content = src.replace("#222222", fill);
         let path = format!("{dir}/{name}");
@@ -154,7 +158,15 @@ fn main() {
             let theme = gtk::IconTheme::for_display(&display);
             theme.add_search_path(base.join("assets"));
             theme.add_search_path(base.join("assets/hicolor"));
+            theme.add_search_path(base.join("usr/share/animecix/assets"));
+            theme.add_search_path(base.join("usr/share/animecix/assets/hicolor"));
             theme.add_search_path(base.join("usr/share/icons"));
+            // target/{debug,release} ve AppImage kökünden yürüyerek proje
+            // asset'lerini de bul; ikisi de birlikte çalışsın.
+            for dir in base.ancestors().take(4) {
+                theme.add_search_path(dir.join("assets"));
+                theme.add_search_path(dir.join("assets/hicolor"));
+            }
 
             let css = gtk::CssProvider::new();
             css.load_from_string(

@@ -1117,6 +1117,14 @@ pub fn build_embedded_player(
                  color: white; \
                  text-shadow: 0 1px 3px rgba(0,0,0,0.8); \
              } \
+            popover.quality-pop button, \
+            popover.quality-pop button:hover, \
+            popover.quality-pop button:checked { \
+                background: none; \
+                background-color: transparent; \
+                background-image: none; \
+                box-shadow: none; \
+            } \
             .player-play-btn { \n                -gtk-icon-size: 32px; \n                color: white; \n                min-width: 56px; \n                min-height: 56px; \n                padding: 0; \n                border: none; \n                box-shadow: none; \n                background: transparent; \n                background-color: transparent; \n                transition: transform 120ms ease, opacity 120ms ease; \n            } \n            .player-play-btn:hover { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(1.12); \n                opacity: 0.85; \n            } \n            .player-play-btn:active { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(0.95); \n            } \n            .player-play-btn image { color: white; -gtk-icon-size: 32px; } \n            .player-center-btn { \n                -gtk-icon-size: 24px; \n                color: white; \n                min-width: 44px; \n                min-height: 44px; \n                padding: 0; \n                border: none; \n                box-shadow: none; \n                background: transparent; \n                background-color: transparent; \n                transition: transform 120ms ease, opacity 120ms ease; \n            } \n            .player-center-btn:hover { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(1.12); \n                opacity: 0.85; \n            } \n            .player-center-btn:active { \n                background: transparent; \n                background-color: transparent; \n                transform: scale(0.95); \n            } \n            .player-center-btn image { color: white; -gtk-icon-size: 24px; } \n            .player-shade scale, .embed-controls scale { padding: 0; } \
             .player-shade scale trough, .embed-controls scale trough { \
                 background: rgba(255, 255, 255, 0.3); \
@@ -1166,7 +1174,32 @@ pub fn build_embedded_player(
                 opacity: 1; \
                 box-shadow: 0 1px 3px rgba(0,0,0,0.8); \
             } \
-            .pill-dropdown, \n            .pill-dropdown button, \n            menubutton.pill-dropdown > button, \n            menubutton.pill-dropdown button { \n                color: white; \n                background: transparent; \n                background-color: transparent; \n                background-image: none; \n                border-radius: 6px; \n                border: none; \n                box-shadow: none; \n                outline: none; \n                padding: 2px 6px; \n                transition: opacity 120ms ease; \n            } \n            .pill-dropdown:hover, \n            .pill-dropdown button:hover, \n            menubutton.pill-dropdown > button:hover { \n                background: transparent; \n                background-color: transparent; \n                background-image: none; \n                opacity: 0.8; \n            } \n            menubutton.pill-dropdown:active > button, \n            menubutton.pill-dropdown:checked > button, \n            menubutton.pill-dropdown > button:checked { \n                background: transparent; \n                background-color: transparent; \n                background-image: none; \n                opacity: 0.9; \n            } \n            .pill-dropdown label, \
+            .pill-dropdown, \
+            .pill-dropdown button, \
+            menubutton.pill-dropdown > button, \
+            menubutton.pill-dropdown button { \
+                color: white; \
+                background: transparent; \
+                background-color: transparent; \
+                background-image: none; \
+                border-radius: 8px; \
+                border: none; \
+                box-shadow: none; \
+                outline: none; \
+                padding: 3px 9px; \
+            } \
+            .pill-dropdown:hover, \
+            .pill-dropdown button:hover, \
+            menubutton.pill-dropdown > button:hover { \
+                background: transparent; \
+                background-color: transparent; \
+            } \
+            menubutton.pill-dropdown:active > button, \
+            menubutton.pill-dropdown:checked > button, \
+            menubutton.pill-dropdown > button:checked { \
+                background: transparent; \
+                background-color: transparent; \
+            } \
             .pill-dropdown button label, \
             menubutton.pill-dropdown label { \
                 color: white; \
@@ -1266,17 +1299,17 @@ pub fn build_embedded_player(
     controls.set_margin_bottom(12);
 
     // --- orta kontroller: Kitsune mimarisi [−10][oynat/duraklat][+10] ---
-    let play_btn = gtk::Button::from_icon_name("net.armatik.Kitsune.media-playback-start-symbolic");
+    let play_btn = gtk::Button::from_icon_name("media-playback-start-symbolic");
     play_btn.set_tooltip_text(Some("Oynat / Duraklat (Boşluk / videoya tıkla)"));
     play_btn.add_css_class("flat");
     play_btn.add_css_class("player-play-btn");
 
-    let back10_btn = gtk::Button::from_icon_name("net.armatik.Kitsune.seek-backward-10-symbolic");
+    let back10_btn = gtk::Button::from_icon_name("seek-backward-10-symbolic");
     back10_btn.set_tooltip_text(Some("10 sn geri (←)"));
     back10_btn.add_css_class("flat");
     back10_btn.add_css_class("player-center-btn");
 
-    let fwd10_btn = gtk::Button::from_icon_name("net.armatik.Kitsune.seek-forward-10-symbolic");
+    let fwd10_btn = gtk::Button::from_icon_name("seek-forward-10-symbolic");
     fwd10_btn.set_tooltip_text(Some("10 sn ileri (→)"));
     fwd10_btn.add_css_class("flat");
     fwd10_btn.add_css_class("player-center-btn");
@@ -1311,11 +1344,11 @@ pub fn build_embedded_player(
         .label("1.0x ▾")
         .tooltip_text("Oynatma hızı")
         .build();
-    speed_btn.add_css_class("flat");
     speed_btn.add_css_class("pill-dropdown");
     let speed_pop = gtk::Popover::builder()
         .position(gtk::PositionType::Top)
         .build();
+    speed_pop.add_css_class("quality-pop");
     speed_btn.set_popover(Some(&speed_pop));
     let speed_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     speed_box.set_margin_top(6);
@@ -1327,11 +1360,11 @@ pub fn build_embedded_player(
         .label("1080p ▾")
         .tooltip_text("Kalite / kaynak")
         .build();
-    quality_btn.add_css_class("flat");
     quality_btn.add_css_class("pill-dropdown");
     let quality_pop = gtk::Popover::builder()
         .position(gtk::PositionType::Top)
         .build();
+    quality_pop.add_css_class("quality-pop");
     quality_btn.set_popover(Some(&quality_pop));
     let quality_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
     quality_box.set_margin_top(6);
@@ -2144,9 +2177,9 @@ pub fn build_embedded_player(
             }
             if let Some(b) = play_w.upgrade() {
                 b.set_icon_name(if s.player.paused() {
-                    "net.armatik.Kitsune.media-playback-start-symbolic"
+                    "media-playback-start-symbolic"
                 } else {
-                    "net.armatik.Kitsune.media-playback-pause-symbolic"
+                    "media-playback-pause-symbolic"
                 });
             }
             // ses senkronu (kullanıcı sürüklemiyorsa)
