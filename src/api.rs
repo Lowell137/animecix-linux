@@ -655,6 +655,9 @@ pub struct Settings {
     pub sidebar_visible: Vec<String>,
     #[serde(default = "default_false")]
     pub focus_mode: bool,
+    /// Bölüm sayfasında ızgara görünümü açık mı.
+    #[serde(default)]
+    pub episodes_grid_view: bool,
     #[serde(default = "default_true")]
     pub auto_next_episode: bool,
     #[serde(default = "default_false")]
@@ -780,6 +783,7 @@ impl Default for Settings {
             sidebar_collapsed: false,
             sidebar_visible: default_sidebar_visible(),
             focus_mode: false,
+            episodes_grid_view: false,
             auto_next_episode: true,
             welcome_seen: false,
             blur_unwatched: true,

@@ -5703,6 +5703,40 @@ impl App {
                 scrim.add_overlay(&label_box);
                 scrim.add_overlay(&check);
 
+                // Grid kartında indirme: yalnızca hover'da sol üstte görünür.
+                let dl_btn = gtk::Button::from_icon_name("folder-download-symbolic");
+                dl_btn.add_css_class("flat");
+                dl_btn.add_css_class("circular");
+                dl_btn.add_css_class("osd");
+                dl_btn.set_halign(gtk::Align::Start);
+                dl_btn.set_valign(gtk::Align::Start);
+                dl_btn.set_margin_top(8);
+                dl_btn.set_margin_start(8);
+                dl_btn.set_size_request(34, 34);
+                dl_btn.set_tooltip_text(Some("Bu bölümü indir"));
+                dl_btn.set_visible(false);
+                scrim.add_overlay(&dl_btn);
+                {
+                    let this_dl = self.clone_ref();
+                    let title_dl = title.clone();
+                    let ep_dl = ep.clone();
+                    dl_btn.connect_clicked(move |_| {
+                        let dl_app = this_dl.clone();
+                        let title_once = title_dl.clone();
+                        let ep_once = ep_dl.clone();
+                        this_dl.ask_download_quality(move |q| {
+                            if let Some(q) = q {
+                                dl_app.start_download_prefetch(
+                                    title_once.clone(),
+                                    vec![ep_once.clone()],
+                                    q,
+                                    true,
+                                );
+                            }
+                        });
+                    });
+                }
+
                 let card = gtk::Box::new(gtk::Orientation::Vertical, 0);
                 card.add_css_class("episode-card");
                 // Bölüm adı etiketinin doğal genişliği (~500px) akış kutusu
@@ -5715,14 +5749,36 @@ impl App {
                 clamp.set_hexpand(true);
                 clamp.set_child(Some(&scrim));
                 card.append(&clamp);
+                {
+                    let enter_btn = dl_btn.clone();
+                    let enter = gtk::EventControllerMotion::new();
+                    enter.connect_enter(move |_, _, _| enter_btn.set_visible(true));
+                    card.add_controller(enter);
+                    let leave_btn = dl_btn.clone();
+                    let leave = gtk::EventControllerMotion::new();
+                    leave.connect_leave(move |_| leave_btn.set_visible(false));
+                    card.add_controller(leave);
+                }
 
                 // Sol tık: oynat.
                 let this_play = self.clone_ref();
                 let title_play = title.clone();
                 let ep_play = ep.clone();
+                let card_geo = card.clone();
+                let dl_geo = dl_btn.clone();
                 let click = gtk::GestureClick::new();
                 click.set_button(1);
-                click.connect_pressed(move |_, _, _, _| {
+                click.connect_pressed(move |_, _, x, y| {
+                    // İndirme düğmesine tıklandıysa kartı oynatma.
+                    if let Some((bx, by)) = dl_geo.translate_coordinates(&card_geo, 0.0, 0.0) {
+                        if x >= bx
+                            && x < bx + dl_geo.width() as f64
+                            && y >= by
+                            && y < by + dl_geo.height() as f64
+                        {
+                            return;
+                        }
+                    }
                     this_play.play(&title_play, &ep_play);
                 });
                 card.add_controller(click);
@@ -5966,16 +6022,21 @@ impl App {
             let list_btn = gtk::ToggleButton::new();
             list_btn.set_child(Some(&gtk::Image::from_icon_name("view-list-symbolic")));
             list_btn.set_tooltip_text(Some("Liste görünümü"));
-            list_btn.set_active(true);
             let grid_btn = gtk::ToggleButton::new();
             grid_btn.set_child(Some(&gtk::Image::from_icon_name("view-grid-symbolic")));
             grid_btn.set_tooltip_text(Some("Izgara görünümü"));
+            let grid_saved = self.settings.borrow().episodes_grid_view;
+            list_btn.set_active(!grid_saved);
+            grid_btn.set_active(grid_saved);
+            list_box.set_visible(!grid_saved);
+            grid_box.set_visible(grid_saved);
             let view_busy = Rc::new(Cell::new(false));
             {
                 let lb = list_box.clone();
                 let gb = grid_box.clone();
                 let gi = grid_btn.clone();
                 let busy = view_busy.clone();
+                let this = self.clone_ref();
                 list_btn.connect_toggled(move |b| {
                     if busy.get() {
                         return;
@@ -5985,6 +6046,10 @@ impl App {
                         gi.set_active(false);
                         lb.set_visible(true);
                         gb.set_visible(false);
+                        let mut s = this.settings.borrow().clone();
+                        s.episodes_grid_view = false;
+                        this.client.save_settings(&s);
+                        *this.settings.borrow_mut() = s;
                     } else {
                         b.set_active(true); // liste kapatılamaz; ızgaraya geçiş grid'ten
                     }
@@ -5996,6 +6061,7 @@ impl App {
                 let gb = grid_box.clone();
                 let li = list_btn.clone();
                 let busy = view_busy.clone();
+                let this = self.clone_ref();
                 grid_btn.connect_toggled(move |b| {
                     if busy.get() {
                         return;
@@ -6005,6 +6071,10 @@ impl App {
                         li.set_active(false);
                         gb.set_visible(true);
                         lb.set_visible(false);
+                        let mut s = this.settings.borrow().clone();
+                        s.episodes_grid_view = true;
+                        this.client.save_settings(&s);
+                        *this.settings.borrow_mut() = s;
                     } else {
                         b.set_active(true);
                     }
@@ -6161,7 +6231,6 @@ impl App {
 
             apply_filter();
 
-            grid_box.set_visible(false);
             episodes_page.append(&list_box);
             episodes_page.append(&grid_box);
         }
