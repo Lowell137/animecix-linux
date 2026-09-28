@@ -9,7 +9,7 @@ const TAU: &str = "https://tau-video.xyz";
 const API_TTL_SECS: u64 = 3 * 3600;
 const IMG_TTL_SECS: u64 = 7 * 24 * 3600;
 
-const MAX_IMG_CACHE_ENTRIES: usize = 150;
+const MAX_IMG_CACHE_ENTRIES: usize = 60;
 
 fn trim_img_cache(map: &mut HashMap<String, (u64, Vec<u8>)>) {
     if map.len() <= MAX_IMG_CACHE_ENTRIES {
@@ -1116,6 +1116,25 @@ impl Client {
         h
     }
 
+    /// Bellekteki JSON önbelleğine yazar ve boyutu sabit tutar.
+    /// Sınırsız büyüme uzun gezinme sonrası yüzlerce MB RAM biriktiriyordu.
+    fn cache_put(&self, key: &str, ts: u64, v: serde_json::Value) {
+        const MEM_API_MAX: usize = 24;
+        let mut m = self.cache.lock().unwrap();
+        m.insert(key.to_string(), (ts, v));
+        if m.len() > MEM_API_MAX {
+            let mut oldest: Vec<(u64, String)> = m
+                .iter()
+                .map(|(k, (t, _))| (*t, k.clone()))
+                .collect();
+            oldest.sort_unstable_by_key(|(t, _)| *t);
+            let over = m.len() - MEM_API_MAX;
+            for (_, k) in oldest.into_iter().take(over) {
+                m.remove(&k);
+            }
+        }
+    }
+
     fn cache_fetch(
         &self,
         key: &str,
@@ -1138,7 +1157,7 @@ impl Client {
 
         if let Some((t, v)) = self.disk_api_load(key) {
             if now.saturating_sub(t) < ttl {
-                self.cache.lock().unwrap().insert(key.to_string(), (t, v.clone()));
+                self.cache_put(key, t, v.clone());
                 return Ok(v);
             }
             let stale = v.clone();
@@ -1149,12 +1168,12 @@ impl Client {
             }
             match net_res {
                 Ok(fresh) => {
-                    self.cache.lock().unwrap().insert(key.to_string(), (now, fresh.clone()));
+                    self.cache_put(key, now, fresh.clone());
                     self.disk_api_save(key, now, &fresh);
                     return Ok(fresh);
                 }
                 Err(_) => {
-                    self.cache.lock().unwrap().insert(key.to_string(), (now, stale.clone()));
+                    self.cache_put(key, now, stale.clone());
                     return Ok(stale);
                 }
             }
@@ -1165,7 +1184,7 @@ impl Client {
         if std::env::var_os("ANIMECIX_BENCH").is_some() {
             eprintln!("[bench] api {key} -> {:.1?}ms", t0.elapsed());
         }
-        self.cache.lock().unwrap().insert(key.to_string(), (now, v.clone()));
+        self.cache_put(key, now, v.clone());
         self.disk_api_save(key, now, &v);
         Ok(v)
     }

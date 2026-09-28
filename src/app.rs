@@ -109,6 +109,9 @@ pub enum Msg {
     Cats(Result<Vec<api::Category>, String>),
     Search(Result<Vec<Title>, String>),
     Eps(Title, Result<Vec<Episode>, String>, Vec<(u64, u64, f64)>),
+    /// Uzak konumlar sayfa AÇILDIKTAN SONRA gelir; görünür satırları
+    /// yerinde günceller. Önceden beklersek detay saniyelerce boş kalıyor.
+    RemotePos(u64, Vec<(u64, u64, f64)>),
     Play(Title, Episode, Result<(Vec<String>, Vec<String>, Vec<String>, Option<f64>), String>),
     Login(Result<(crate::auth::User, usize), String>),
     ServerHistory(Result<(Vec<api::ServerEntry>, usize), String>, bool),
@@ -1740,9 +1743,7 @@ impl App {
                 switch(&self.stack, "search", gtk::StackTransitionType::SlideLeft, self.build_search_view());
             }
             Page::Episodes { title, eps } | Page::Movie { title, eps } => {
-                // Anime adı bilgi alanında zaten görünüyor; başlık çubuğunda
-                // tekrar yazmıyoruz (Kitsune gibi boş).
-                self.title_label.set_text("");
+                self.title_label.set_text(&title.name);
                 let page_name = format!("eps_{}", title.id);
                 switch(&self.stack, &page_name, gtk::StackTransitionType::SlideLeft, self.build_episodes_view(title, eps));
             }
@@ -5938,13 +5939,17 @@ impl App {
                 season_lbl.add_css_class("dim-label");
                 season_lbl.set_valign(gtk::Align::Center);
                 tab_bar.append(&season_lbl);
-                let tab_btns: Rc<RefCell<Vec<(u64, gtk::Button)>>> =
+                let tab_btns: Rc<RefCell<Vec<(u64, gtk::ToggleButton)>>> =
                     Rc::new(RefCell::new(Vec::new()));
                 for s in &seasons {
-                    let b = gtk::Button::with_label(&format!("{s}"));
+                    // Düz Button yerine ToggleButton: ok tuşlarıyla gezinme
+                    // ve "seçili" durumu ekran okuyucuya doğru gider.
+                    // linked yok, dolayısıyla görünüm aynı kalıyor.
+                    let b = gtk::ToggleButton::with_label(&format!("{s}"));
                     b.add_css_class("pill");
                     b.add_css_class("season-tab");
                     if *s == default_season {
+                        b.set_active(true);
                         b.add_css_class("suggested-action");
                     }
                     let sel_c = sel_season.clone();
@@ -5954,6 +5959,7 @@ impl App {
                     b.connect_clicked(move |_| {
                         sel_c.set(ss);
                         for (bs, bb) in btns_c.borrow().iter() {
+                            bb.set_active(*bs == ss);
                             if *bs == ss {
                                 bb.add_css_class("suggested-action");
                             } else {
@@ -6397,6 +6403,47 @@ impl App {
                     Err(e) => self.show_error(&e),
                 }
             }
+            // Uzak konumlar sayfa açıldıktan SONRA gelir; bulunan kaydı
+            // haritaya yazıp görünür satırın çubuğunu/etiketini yerinde
+            // tazele. Böylece detay beklemeden açılır, ilerleme sonradan gelir.
+            Msg::RemotePos(tid, remotes) => {
+                if remotes.is_empty() {
+                    return;
+                }
+                {
+                    let mut rp = self.remote_progress.borrow_mut();
+                    for (s, e, rpos) in &remotes {
+                        rp.insert(format!("{tid}:{s}:{e}"), (*rpos, 0.0));
+                    }
+                }
+                let bars = self.progress_bars.borrow();
+                for (s, e, rpos) in &remotes {
+                    let key = format!("{tid}:{s}:{e}");
+                    let Some((pb, lbl)) = bars.get(&key) else { continue };
+                    // Süre yalnızca yerel kayıtta biliniyor; uzakta değil.
+                    let dur = self
+                        .progress
+                        .borrow()
+                        .get(&key)
+                        .map(|(_, d)| *d)
+                        .unwrap_or(0.0);
+                    if dur <= 0.0 || *rpos <= 1.0 {
+                        continue;
+                    }
+                    pb.set_fraction((rpos / dur).clamp(0.0, 1.0));
+                    pb.set_visible(true);
+                    let fmt = |sec: f64| -> String {
+                        let t = sec as u64;
+                        if t >= 3600 {
+                            format!("{}:{:02}:{:02}", t / 3600, (t % 3600) / 60, t % 60)
+                        } else {
+                            format!("{}:{:02}", t / 60, t % 60)
+                        }
+                    };
+                    lbl.set_text(&format!("{} / {}", fmt(*rpos), fmt(dur)));
+                    lbl.set_visible(true);
+                }
+            }
             Msg::Play(title, ep, res) => match res {
                 Ok((fast, fast_embeds, fallback, remote)) => {
                     self.play_candidates(&title, &ep, &fast, &fast_embeds, &fallback, remote)
@@ -6823,32 +6870,47 @@ impl App {
             move || Msg::DetData(det_id, related, credits, reviews, total)
         });
         let logged = self.client.is_logged_in();
+        // İlk görev sayfayı açar; `title` kopyası ikinci görevde kalır.
+        let title_open = title.clone();
         self.spawn(move |c| {
-            let enriched = c.enrich_title(&title);
+            let enriched = c.enrich_title(&title_open);
             let res = c.episodes(&enriched);
-            // Uzak konumlar önden çekilir (ilerleme çubuğu + izlendi tiki);
-            // yerelde izlenenler atlanır — istek fırtınası küçülür.
-            let mut remotes: Vec<(u64, u64, f64)> = Vec::new();
-            if logged {
-                if let Ok(eps) = &res {
-                    let local = c.load_state().progress;
-                    let tid0 = enriched.id;
-                    let mut targets: Vec<(u64, u64)> = eps
-                        .iter()
-                        .map(|e| (e.season, e.episode))
-                        .filter(|(s, e)| !local.contains_key(&format!("{tid0}:{s}:{e}")))
-                        .collect();
-                    targets.truncate(120);
-                    let tid = enriched.id;
+            // Sayfa HEMEN açılır. Uzak konumlar (izlenmemiş her bölüm için
+            // ayrı HTTP isteği) ayrı görevde sonra gelir; önceden bekleniyordu
+            // ve 100+ bölümlü bir anime'de detay saniyelerce boş kalıyordu.
+            move || Msg::Eps(enriched, res, Vec::new())
+        });
+
+        if !logged {
+            return;
+        }
+        self.spawn(move |c| {
+            // `spawn` her zaman bir Msg üreten kaplama istiyor; erken
+            // çıkışları boş sonuçla karşılıyoruz.
+            let remotes: Vec<(u64, u64, f64)> = (|| {
+                let Ok(eps) = c.episodes(&title) else { return Vec::new() };
+                // Yerelde izlenenler atlanır — istek fırtınası küçülür.
+                let local = c.load_state().progress;
+                let tid = title.id;
+                let mut targets: Vec<(u64, u64)> = eps
+                    .iter()
+                    .map(|e| (e.season, e.episode))
+                    .filter(|(s, e)| !local.contains_key(&format!("{tid}:{s}:{e}")))
+                    .collect();
+                targets.truncate(120);
+                let mut remotes: Vec<(u64, u64, f64)> = Vec::new();
+                // 120 eşzamanlı istek paylaşılan HTTP havuzunu ve ağı tıkıyor,
+                // poster/kapak indirmeleri zaman aşımına düşüyordu. 8'lik
+                // gruplar halinde sırayla sor: sayfa hızlı, indirme sağlam.
+                for chunk in targets.chunks(8) {
                     std::thread::scope(|scope| {
-                        let mut hs = Vec::new();
-                        for (s, e) in targets {
-                            let cc = c.clone();
-                            hs.push(scope.spawn(move || {
-                                let r = cc.get_remote_pos(tid, s, e).unwrap_or(0.0);
-                                ((s, e), r)
-                            }));
-                        }
+                        let hs: Vec<_> = chunk
+                            .iter()
+                            .map(|&(s, e)| {
+                                let cc = c.clone();
+                                scope.spawn(move || ((s, e), cc.get_remote_pos(tid, s, e).unwrap_or(0.0)))
+                            })
+                            .collect();
                         for h in hs {
                             if let Ok(((s, e), r)) = h.join() {
                                 if r > 5.0 {
@@ -6858,8 +6920,10 @@ impl App {
                         }
                     });
                 }
-            }
-            move || Msg::Eps(enriched.clone(), res, remotes)
+                remotes
+            })();
+            let tid = title.id;
+            move || Msg::RemotePos(tid, remotes)
         });
     }
 

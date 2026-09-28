@@ -27,3 +27,6 @@ src/bin/scrolltest.rs
 flathub/
 *.bak*
 .playwright-cli/
+
+# === Yerel kaynak arşivleri (GitHub'a gönderilmez) ===
+animecix-source-*.tar.gz

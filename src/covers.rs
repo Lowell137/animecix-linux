@@ -265,7 +265,8 @@ impl CoverManager {
     }
 
     fn pump_covers(&self) {
-        let max_workers = 12;
+        // 12 eşzamanlı decode 6 çekirdekte UI'yi açıkça geciktiriyordu.
+        let max_workers = 6;
         let mut active = self.active.get();
 
         while active < max_workers {
@@ -303,9 +304,14 @@ impl CoverManager {
         let mut keys_to_remove = Vec::new();
 
         if let Some(b) = &bytes {
+            // Tüm doku önbelleğini birden temizlemek, görünür posterlerin
+            // yeniden decode edilmesine yol açıp sayfaları yavaşlatıyordu.
+            // Bunun yerine yalnızca fazla girdileri kademeli düşür.
+            const TEX_CACHE_MAX: usize = 96;
             let mut cache = self.cache.borrow_mut();
-            if cache.len() > 40 {
-                cache.clear();
+            while cache.len() > TEX_CACHE_MAX {
+                let Some(k) = cache.keys().next().cloned() else { break };
+                cache.remove(&k);
             }
 
             for (key, pics) in waiters.iter() {
