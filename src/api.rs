@@ -5,6 +5,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const BASE: &str = "https://animecix.tv";
+/// Manga modunun taban adresi. AnimeciX ile aynı hesabı ve aynı API
+/// yüzeyini kullanıyor, yalnız taban adresi farklı.
+pub(crate) const MANGA_BASE: &str = "https://mangacix.net";
 const TAU: &str = "https://tau-video.xyz";
 const API_TTL_SECS: u64 = 3 * 3600;
 const IMG_TTL_SECS: u64 = 7 * 24 * 3600;
@@ -159,6 +162,12 @@ impl Title {
         if !Self::is_anime_entry(r) {
             return None;
         }
+        Self::from_value_lenient(r)
+    }
+
+    /// Tür filtresi uygulamadan başlığa çevirir. Manga girdilerinde
+    /// `title_type` boş geldiği için manga modu bunu kullanır.
+    pub fn from_value_lenient(r: &serde_json::Value) -> Option<Title> {
         let id = r["id"].as_u64().or_else(|| r["title_id"].as_u64())?;
         let tt = r["title_type"].as_str().unwrap_or("").to_string();
         let genres = r["genres"].as_array().map(|arr| {
@@ -645,6 +654,10 @@ pub struct Settings {
     pub upscale: String,
     #[serde(default)]
     pub light_mode: bool,
+    /// Anime modu mu manga modu mu. Kalıcı: uygulama yeniden açılınca
+    /// kaldığı modda başlar.
+    #[serde(default)]
+    pub manga_mode: bool,
     #[serde(default = "default_patience")]
     pub source_patience_secs: u64,
     #[serde(default)]
@@ -777,6 +790,7 @@ impl Default for Settings {
             embedded_player: default_true(),
             upscale: default_upscale(),
             light_mode: false,
+            manga_mode: false,
             source_patience_secs: default_patience(),
             default_fansub_template: None,
             fansub_ask_each_time: true,
@@ -1217,6 +1231,54 @@ impl Client {
                             if let Some(t) = Title::from_value(it) {
                                 items.push(t);
                             }
+                        }
+                    }
+                }
+                if !items.is_empty() {
+                    cats.push(Category {
+                        name: lst["name"].as_str().unwrap_or("").to_string(),
+                        items,
+                    });
+                }
+            }
+        }
+        Ok(cats)
+    }
+
+    /// Manga modunun ana sayfa listeleri. MangaCiX ayrı bir uygulama olarak
+    /// aynı hesabı kullanıyor, bu yüzden veri aynı anda iki uygulamada da
+    /// duruyordu; burada ayrı bir önbellek anahtarı ve ayrı bir taban adres
+    /// kullanıyoruz. Manga girdilerinde `title_type` boş geldiği için
+    /// `Title::from_value` burada kullanılmaz — `is_manga_entry` ters yönde
+    /// filtreler.
+    pub fn manga_home_lists(&self) -> Result<Vec<Category>, String> {
+        let d = self.cache_get("manga_lists", API_TTL_SECS, |http| {
+            http.get(format!("{MANGA_BASE}/secure/homepage/lists-guests"))
+                .header("Accept", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .send()
+                .map_err(|e| e.to_string())?
+                .error_for_status()
+                .map_err(|e| e.to_string())?
+                .json()
+                .map_err(|e| e.to_string())
+        })?;
+        let mut cats = Vec::new();
+        if let Some(lists) = d["lists"].as_array() {
+            for lst in lists {
+                let mut items = Vec::new();
+                if let Some(arr) = lst["items"].as_array() {
+                    for it in arr {
+                        if it["id"].as_u64().is_none() {
+                            continue;
+                        }
+                        if let Some(mut t) = Title::from_value_lenient(it) {
+                            // Manga girdilerinde `title_type` boş; arayüz
+                            // etiketleri (TV/Film) doğru görünsün diye doldur.
+                            if t.title_type.is_none() {
+                                t.title_type = Some("manga".into());
+                            }
+                            items.push(t);
                         }
                     }
                 }

@@ -34,6 +34,10 @@ pub enum Page {
     Search,
     Account,
     CustomList { name: String, titles: Vec<Title> },
+    /// Manga modu: MangaCiX verisi, anime modundan ayrı pencere değil aynı
+    /// yığın içinde başka bir sayfa. Okuyucu henüz taşınmadı; liste gerçek
+    /// veriden geliyor.
+    MangaHome,
 }
 
 #[derive(Clone)]
@@ -61,6 +65,8 @@ pub(crate) enum SidebarId {
     Calendar,
     News,
     Downloads,
+    /// Anime <-> Manga modu anahtarı; menünün tepesinde durur.
+    Manga,
     Login,
     Collapse,
 }
@@ -88,6 +94,7 @@ fn dock_caption(id: SidebarId) -> Option<&'static str> {
         SidebarId::Calendar => Some("Takvim"),
         SidebarId::News => Some("Haber"),
         SidebarId::Downloads => Some("İndir"),
+        SidebarId::Manga => Some("Manga"),
         _ => None,
     }
 }
@@ -102,10 +109,14 @@ fn sidebar_id_key(id: SidebarId) -> Option<&'static str> {
         SidebarId::Calendar => Some("calendar"),
         SidebarId::News => Some("news"),
         SidebarId::Downloads => Some("downloads"),
-        SidebarId::Login | SidebarId::Collapse => None,
+        // Manga anahtarı navigasyon satırı değil, durum anahtarı: kullanıcı
+        // onu gizleyemez/taşıyamaz, her zaman görünür (Login/Collapse gibi).
+        SidebarId::Login | SidebarId::Collapse | SidebarId::Manga => None,
     }
 }
 pub enum Msg {
+    /// Manga modunun ana sayfa listeleri.
+    MangaCats(Result<Vec<api::Category>, String>),
     Cats(Result<Vec<api::Category>, String>),
     Search(Result<Vec<Title>, String>),
     Eps(Title, Result<Vec<Episode>, String>, Vec<(u64, u64, f64)>),
@@ -167,6 +178,10 @@ pub struct App {
     pub sidebar_revealer: gtk::Revealer,
     pub side_items: Rc<RefCell<Vec<SideItem>>>,
     pub side_collapse_btn: gtk::Button,
+    /// Anime <-> Manga modu anahtarı ve o anki mod etiketi.
+    pub mode_btn: gtk::Button,
+    pub mode_lbl: gtk::Label,
+    pub mode_icon: gtk::Image,
     /// Sidebar üst barı (arama + menü düğmeleri).
     pub side_search_btn: gtk::Button,
     pub side_menu_btn: gtk::Button,
@@ -178,6 +193,10 @@ pub struct App {
     pub covers: CoverManager,
     pub page_history: Rc<RefCell<Vec<Page>>>,
     pub cats: Rc<RefCell<Vec<api::Category>>>,
+    /// Manga modunun ana sayfa listeleri (mod düğmesiyle ayrı önbellek).
+    pub manga_cats: Rc<RefCell<Vec<api::Category>>>,
+    /// O anki mod: true = manga. Ayar dosyasına yazılır.
+    pub manga_mode: Rc<Cell<bool>>,
     pub search_results: Rc<RefCell<Vec<Title>>>,
     pub settings: Rc<RefCell<api::Settings>>,
     pub progress: Rc<RefCell<HashMap<String, (f64, f64)>>>,
@@ -556,6 +575,42 @@ impl App {
         side_head.append(&side_menu_btn);
         sidebar.append(&side_head);
 
+        // Mod anahtarı: anime <-> manga. Gezinme satırlarının hemen üstünde,
+        // ayraçla ayrılmış — "bundan sonrası anime" sinyali veriyor.
+        // side_row DEĞİL: o bir navigasyon satırı, bu bir durum anahtarı;
+        // aktif hali `suggested-action` ile boyanıyor.
+        let mode_btn = gtk::Button::new();
+        mode_btn.add_css_class("flat");
+        mode_btn.add_css_class("side-row");
+        mode_btn.add_css_class("mode-switch");
+        mode_btn.set_halign(gtk::Align::Fill);
+        let mode_inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
+        mode_inner.set_margin_top(6);
+        mode_inner.set_margin_bottom(6);
+        mode_inner.set_margin_start(10);
+        mode_inner.set_margin_end(10);
+        let mode_icon = gtk::Image::from_icon_name("comic-book-symbolic");
+        mode_icon.set_valign(gtk::Align::Center);
+        let mode_lbl = gtk::Label::new(Some("Manga Modu"));
+        mode_lbl.set_xalign(0.0);
+        mode_lbl.set_hexpand(true);
+        mode_inner.append(&mode_icon);
+        mode_inner.append(&mode_lbl);
+        mode_btn.set_child(Some(&mode_inner));
+        let mode_sep = gtk::Separator::new(gtk::Orientation::Horizontal);
+        mode_sep.set_margin_bottom(4);
+        sidebar.append(&mode_sep);
+        sidebar.append(&mode_btn);
+        side_items.borrow_mut().push(SideItem {
+            id: SidebarId::Manga,
+            btn: mode_btn.clone(),
+            label: mode_lbl.clone(),
+            icon: mode_icon.clone(),
+            avatar: None,
+            tip: "Anime ve manga arasında geç (Manga modu)",
+            full: "Manga Modu".to_string(),
+        });
+
         let home_btn = side_row(&sidebar, &side_items, SidebarId::Home, "Ana Sayfa", "go-home-symbolic", "Ana Sayfa");
         let kesfet_btn = side_row(&sidebar, &side_items, SidebarId::Kesfet, "Keşfet", "view-grid-symbolic", "Keşfet");
         let fav_btn = side_row(&sidebar, &side_items, SidebarId::Favs, "Favoriler", "starred-symbolic", "Favoriler");
@@ -700,7 +755,12 @@ impl App {
             .build();
         window.set_size_request(1479, 845);
 
-        let initial_page = Page::Home;
+        // Kayıtlı manga modunda doğrudan manga ana sayfasından başla.
+        let initial_page = if client.load_settings().manga_mode {
+            Page::MangaHome
+        } else {
+            Page::Home
+        };
 
         let covers = CoverManager::new(client.clone());
 
@@ -726,6 +786,9 @@ impl App {
             sidebar_revealer,
             side_items: side_items.clone(),
             side_collapse_btn,
+            mode_btn: mode_btn.clone(),
+            mode_lbl: mode_lbl.clone(),
+            mode_icon: mode_icon.clone(),
             side_search_btn,
             side_menu_btn,
             side_head,
@@ -735,6 +798,8 @@ impl App {
             covers,
             page_history: Rc::new(RefCell::new(vec![initial_page.clone()])),
             cats: Rc::new(RefCell::new(Vec::new())),
+            manga_cats: Rc::new(RefCell::new(Vec::new())),
+            manga_mode: Rc::new(Cell::new(false)),
             search_results: Rc::new(RefCell::new(Vec::new())),
             settings: Rc::new(RefCell::new(client.load_settings())),
             progress: Rc::new(RefCell::new(client.load_state().progress)),
@@ -861,6 +926,16 @@ impl App {
         app_inst.dl_manager.set_connections(app_inst.settings.borrow().download_connections);
         app_inst.apply_ui_scale();
         app_inst.apply_sidebar();
+        // Kayıtlı modu geri yükle: düğmeyi boya ve doğru sayfadan başla.
+        // Manga modundaysak anime listelerini hiç çekmiyoruz.
+        {
+            let saved_manga = app_inst.settings.borrow().manga_mode;
+            if saved_manga {
+                app_inst.manga_mode.set(true);
+                app_inst.fetch_manga_home();
+            }
+            app_inst.paint_mode_button();
+        }
         // Açılışta girişliyse sunucu favorilerini sessizce birleştir.
         {
             let c = app_inst.client.clone();
@@ -872,7 +947,10 @@ impl App {
             });
         }
         app_inst.show_page(&initial_page);
-        app_inst.fetch_home();
+        // Manga modunda anime ana verisini çekmiyoruz (gereksiz ağ + bellek).
+        if initial_page == Page::Home {
+            app_inst.fetch_home();
+        }
         app_inst.apply_goto_arg();
         app_inst
     }
@@ -899,8 +977,13 @@ impl App {
             pal_cache: self.pal_cache.clone(),
             client: self.client.clone(),
             covers: self.covers.clone_ref(),
+            mode_btn: self.mode_btn.clone(),
+            mode_lbl: self.mode_lbl.clone(),
+            mode_icon: self.mode_icon.clone(),
             page_history: self.page_history.clone(),
             cats: self.cats.clone(),
+            manga_cats: self.manga_cats.clone(),
+            manga_mode: self.manga_mode.clone(),
             search_results: self.search_results.clone(),
             settings: self.settings.clone(),
             progress: self.progress.clone(),
@@ -989,6 +1072,14 @@ impl App {
             self.side_search_btn.connect_clicked(move |_| {
                 this.open_search_popup();
             });
+        }
+
+        // Mod anahtarı: anime <-> manga. Düğmenin etiketi ve ikonu o anki
+        // modu gösterir ("Manga Modu" / "Anime Modu") — hangi modda
+        // olduğun tek bakışta okunur.
+        {
+            let this = self.clone_ref();
+            self.mode_btn.connect_clicked(move |_| this.toggle_mode());
         }
 
         // Hamburger menü: Ayarlar + Hakkında (doğrudan butonlu popover;
@@ -1846,6 +1937,10 @@ impl App {
             Page::Downloads => {
                 self.title_label.set_text("İndirilenler");
                 switch(&self.stack, "downloads", gtk::StackTransitionType::Crossfade, self.build_downloads_view());
+            }
+            Page::MangaHome => {
+                self.title_label.set_text("Manga");
+                switch(&self.stack, "manga_home", gtk::StackTransitionType::Crossfade, self.build_manga_home_view());
             }
         }
     }
@@ -2946,6 +3041,97 @@ impl App {
         }
         root.append(&Self::poster_grid(cards, self.grid_cols.get(), true));
         root
+    }
+
+    /// Anime <-> Manga modu. Mod hem ayar dosyasına yazılır (kalıcı) hem
+    /// değişiklik anında uygulanır. Manga moduna geçerken ana sayfa gerçek
+    /// veriden yeniden kurulur.
+    pub fn toggle_mode(&self) {
+        let next = !self.manga_mode.get();
+        self.manga_mode.set(next);
+        {
+            let mut s = self.settings.borrow_mut();
+            s.manga_mode = next;
+            self.client.save_settings(&s);
+        }
+        self.paint_mode_button();
+
+        if next {
+            if self.manga_cats.borrow().is_empty() {
+                self.fetch_manga_home();
+            }
+            self.show_page(&Page::MangaHome);
+        } else {
+            if self.cats.borrow().is_empty() {
+                self.fetch_home();
+            }
+            self.show_page(&Page::Home);
+        }
+    }
+
+    /// Mod düğmesinin etiket/ikon/renkini güncelle. Etiket o anki modu
+    /// değil, GEÇİŞİ anlatır ("Manga Modu" iken anime'ye dönüş).
+    fn paint_mode_button(&self) {
+        let manga = self.manga_mode.get();
+        self.mode_lbl.set_text(if manga { "Anime Modu" } else { "Manga Modu" });
+        self.mode_icon
+            .set_from_icon_name(Some(if manga { "video-symbolic" } else { "comic-book-symbolic" }));
+        self.mode_btn.set_tooltip_text(Some(if manga {
+            "AnimeciX'e dön (Anime modu)"
+        } else {
+            "Manga moduna geç"
+        }));
+        if manga {
+            self.mode_btn.add_css_class("suggested-action");
+        } else {
+            self.mode_btn.remove_css_class("suggested-action");
+        }
+    }
+
+    fn fetch_manga_home(&self) {
+        eprintln!("[MANGA] ana sayfa listeleri çekiliyor");
+        self.spawn(move |c| {
+            let res = c.manga_home_lists();
+            move || Msg::MangaCats(res)
+        });
+    }
+
+    /// Manga ana sayfası. Okuyucu henüz taşınmadı; liste gerçek veriden
+    /// geliyor ve detay sayfası anime akışıyla aynı.
+    fn build_manga_home_view(&self) -> gtk::ScrolledWindow {
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hexpand(true);
+        scroll.set_vexpand(true);
+        let cats = self.manga_cats.borrow();
+
+        if cats.is_empty() {
+            let box_ = gtk::Box::new(gtk::Orientation::Vertical, 16);
+            box_.set_valign(gtk::Align::Center);
+            box_.set_halign(gtk::Align::Center);
+            box_.set_vexpand(true);
+            let sp = gtk::Spinner::new();
+            sp.set_size_request(48, 48);
+            sp.start();
+            let lbl = gtk::Label::new(Some("Manga serileri yükleniyor…"));
+            lbl.add_css_class("dim-label");
+            box_.append(&sp);
+            box_.append(&lbl);
+            scroll.set_child(Some(&box_));
+            return scroll;
+        }
+
+        let main_box = gtk::Box::new(gtk::Orientation::Vertical, 18);
+        main_box.set_hexpand(true);
+        main_box.set_halign(gtk::Align::Fill);
+        main_box.set_margin_bottom(18);
+        main_box.set_margin_start(12);
+        main_box.set_margin_end(12);
+
+        for (idx, cat) in cats.iter().enumerate() {
+            main_box.append(&self.build_carousel(cat, idx));
+        }
+        scroll.set_child(Some(&main_box));
+        scroll
     }
 
     fn build_home_view(&self) -> gtk::ScrolledWindow {
@@ -6687,6 +6873,26 @@ impl App {
 
     fn handle_msg(&self, msg: Msg) {
         match msg {
+            Msg::MangaCats(res) => match res {
+                Ok(cats) => {
+                    eprintln!("[MANGA] {} liste geldi", cats.len());
+                    *self.manga_cats.borrow_mut() = cats;
+                    // Geçmişe bakma: mod düğmesi show_page çağırıyor ama
+                    // history'ye eklemiyor. Görünür yığın çocuğuna bakalım.
+                    if self
+                        .stack
+                        .visible_child()
+                        .map(|c| c.widget_name() == "manga_home")
+                        .unwrap_or(false)
+                    {
+                        self.show_page(&Page::MangaHome);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[MANGA] HATA: {e}");
+                    self.show_error(&e)
+                }
+            },
             Msg::Cats(res) => match res {
                 Ok(cats) => {
                     *self.cats.borrow_mut() = cats;
