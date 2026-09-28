@@ -146,6 +146,16 @@ fn main() {
         libc::mallopt(libc::M_MMAP_THRESHOLD, 64 * 1024);
     }
 
+    // "Hafif Mod": GTK'nin GL çizicisini yazılıma düşür. NVIDIA yığını
+    // (libnvidia-gpucomp 53 MB, libLLVM, glcore/eglcore) yüklenmez —
+    // düşük RAM'li makinelerde asıl kazanç bu. Ayar `light_mode`
+    // alanında; anahtar burada hiç okunmuyordu, sadece arayüzde vardı.
+    // GSK_RENDERER GTK başlamadan verilmek zorunda.
+    if api::Client::read_settings().light_mode {
+        std::env::set_var("GSK_RENDERER", "cairo");
+        eprintln!("[PERF] hafif mod: arayüz yazılımla çizilecek (GSK_RENDERER=cairo)");
+    }
+
     let app_id = std::env::var("FLATPAK_ID").unwrap_or_else(|_| "tr.com.animecix".to_string());
     let app = adw::Application::builder()
         .application_id(&app_id)

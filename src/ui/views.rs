@@ -765,7 +765,7 @@ impl SettingsView {
 
         let light_row = adw::SwitchRow::new();
         light_row.set_title("Hafif Mod (Düşük RAM)");
-        light_row.set_subtitle("Arayüzü CPU ile çizer, bellek kullanımını ~%35 azaltır. Uygulamayı yeniden başlatınca geçerli olur.");
+        light_row.set_subtitle("Arayüzü yazılımla çizer: NVIDIA çizici kütüphaneleri (~280 MB) yüklenmez, boştayken bellek belirgin düşer. Video açılınca oynatıcının kendi OpenGL bağlamı bu kütüphaneleri geri yükler, kazancın bir kısmı oynatırken kaybolur. Uygulamayı yeniden başlatınca geçerli olur.");
         light_row.set_active(settings.light_mode);
         perf_group.add(&light_row);
 

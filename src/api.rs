@@ -3330,6 +3330,16 @@ impl Client {
             .unwrap_or_default()
     }
 
+    /// Ayarları `Client` kurulmadan okur. Açılışta, GTK başlatılmadan
+    /// önce gerekiyor (GSK_RENDERER ortam değişkeni olarak verilmeli).
+    pub fn read_settings() -> Settings {
+        let p = Self::settings_path();
+        std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
     pub fn save_settings(&self, s: &Settings) {
         let p = Self::settings_path();
         if let Some(parent) = p.parent() {
