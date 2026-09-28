@@ -1438,6 +1438,7 @@ impl Client {
         id: u64,
     ) -> Result<(Title, Vec<MangaChapter>, Vec<MangaPage>), String> {
         let key = format!("manga_detail:{id}");
+        let t0 = std::time::Instant::now();
         let d = self.cache_get(&key, 900, |http| {
             let sig = crate::xeh::sign_query("")?;
             http.get(format!("{MANGA_BASE}/secure/titles/{id}"))
@@ -1506,6 +1507,12 @@ impl Client {
         for c in chapters.iter_mut() {
             c.page_count = pages.iter().filter(|p| p.episode_id == c.id).count();
         }
+        eprintln!(
+            "[MANGA/DETAY] {} bölüm, {} sayfa, {:?} (önbellek anahtarı {key})",
+            chapters.len(),
+            pages.len(),
+            t0.elapsed()
+        );
         Ok((t, chapters, pages))
     }
 

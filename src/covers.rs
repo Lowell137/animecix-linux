@@ -121,16 +121,25 @@ impl CoverManager {
         self.load_cover_impl(&Self::thumb_url(&url, false), pic, w, h);
     }
 
-    /// Manga okuyucusu: sabit boyut istemeyen, kendi doğal boyutunda
-    /// (kaynak çözünürlükte) duran sayfa görseli. ScrolledWindow içinde
-    /// kaydırılır; `ContentFit::Contain` ile küçük pencerede de sığar.
-    pub fn manga_page_picture(&self, url: &str) -> gtk::Picture {
+    /// Manga okuyucusu sayfası.
+    ///
+    /// NOT: doku hattı HEDEF boyuta ölçekleyip kırpar; 0x0 verirsen 1x1
+    /// doku üretip sayfa boş görünür. Bu yüzden kaynağı en fazla `max_w`
+    /// genişliğe indiriyoruz (okuyucuda 1400px üstü kazanım yok, bellek
+    /// 11 MB/sayfa yerine ~2 MB).
+    pub fn manga_page_picture(&self, url: &str, src_w: u32, src_h: u32, max_w: u32) -> gtk::Picture {
         let pic = gtk::Picture::new();
         pic.set_content_fit(gtk::ContentFit::Contain);
         pic.set_halign(gtk::Align::Center);
         pic.set_valign(gtk::Align::Center);
-        // 0x0 = kısıt yok; doku doğal boyutta pişirilir.
-        self.load_cover_impl(url, &pic, 0, 0);
+        let (w, h) = if src_w > 0 && src_h > 0 {
+            let w = max_w.min(src_w);
+            let h = ((w as f64) * (src_h as f64) / (src_w as f64)).round() as u32;
+            (w as i32, h as i32)
+        } else {
+            (max_w as i32, 0)
+        };
+        self.load_cover_impl(url, &pic, w, h);
         pic
     }
 

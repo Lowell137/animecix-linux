@@ -522,6 +522,10 @@ impl App {
         // "AnimeciX ▾" / "Mangacix ▾"; popover'da iki mod satırı, aktif
         // olanın sağında onay işareti.
         let mode_menu_btn = gtk::MenuButton::new();
+        // `.flat` şart: tema `headerbar menubutton:not(.flat)... > button`
+        // kurallarıyla arka plan dayatıyor; flat olanları bu kurallar
+        // dışarıda bırakıyor (başlıktaki geri/yenile düğmeleri de böyle).
+        mode_menu_btn.add_css_class("flat");
         mode_menu_btn.add_css_class("title-menu");
         mode_menu_btn.set_tooltip_text(Some("Mod değiştir"));
         let mode_label = gtk::Label::new(Some("AnimeciX"));
@@ -2537,17 +2541,18 @@ impl App {
     }
 
     /// Site tarzı devam kartı: kapak + hover-play + ad + "S01E02 · Tür".
-    /// Izgarada sabit boydur (140x290); maraton butonu her zaman görünür, play butonu hover'da.
+    /// Izgarada sabit boydur (140x270 — std_poster_card ile aynı);
+    /// maraton butonu her zaman görünür, play butonu hover'da.
     fn continue_card(&self, t: &Title, ep: Option<&Episode>) -> gtk::Box {
         let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
         card.add_css_class("title-btn");
-        card.set_size_request(140, 290);
-        // Fill: sütun genişliğine (140) sabitlenir. Center natural boyutta
-        // çizerdi; uzun başlıklı kartlar daha geniş basılıyordu.
+        card.set_size_request(140, 270);
         card.set_halign(gtk::Align::Fill);
         card.set_valign(gtk::Align::Start);
         let pic = self.covers.cover_picture(t.poster.as_deref(), 140, 210);
-        pic.set_size_request(140, 210);
+        // std_poster_card ile aynı: ortala + kırpma yok, köşe yuvarlaklığı
+        // .cover (10px) overlay üzerinden aynı kalır.
+        pic.set_halign(gtk::Align::Center);
         pic.set_can_shrink(false);
         let overlay = gtk::Overlay::new();
         overlay.add_css_class("poster-lift");
@@ -3478,6 +3483,7 @@ impl App {
             box_.append(&lbl);
             root.append(&box_);
         } else {
+            let t_draw = std::time::Instant::now();
             let list = gtk::ListBox::new();
             list.add_css_class("content-list");
             list.set_selection_mode(gtk::SelectionMode::None);
@@ -3521,6 +3527,8 @@ impl App {
                 row.add_controller(click);
                 list.append(&row);
             }
+            let n = chapters.len();
+            eprintln!("[MANGA/DETAY] {n} satır çizildi: {:?}", t_draw.elapsed());
             root.append(&list);
         }
         scroll.set_child(Some(&root));
@@ -3560,7 +3568,8 @@ impl App {
         let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
         area.set_child(Some(&holder));
         if let Some(p) = ch_pages.get(idx) {
-            holder.append(&self.covers.manga_page_picture(&p.url));
+            // Okunabilir en fazla 1400px; kaynak daha büyükse bellek için küçültülür.
+            holder.append(&self.covers.manga_page_picture(&p.url, p.width, p.height, 1400));
         }
 
         // Tıklama: sağ yarı = ileri, sol yarı = geri (okuma yönü).

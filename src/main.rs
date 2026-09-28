@@ -510,7 +510,11 @@ fn main() {
                 /* === Başlık Menüsü (GNOME HIG) ===
                    Ortadaki .flat MenuButton: "AnimeciX ▾". Popover'da iki
                    mod satırı, aktif olanın sağında onay işareti. */
-                .title-menu {
+                /* `headerbar button.title-menu` ile temanın menubutton
+                   kurallarından daha spesifik; yine de .flat zaten onları
+                   dışlıyor, ikisi birlikte güvenli. */
+                headerbar button.title-menu,
+                headerbar menubutton.title-menu {
                     /* Zemin tamamen kaldırıldı: normalde, hover'da ve
                        menü açıkken bile arka plan yok. */
                     background-color: transparent;
@@ -524,10 +528,14 @@ fn main() {
                     font-size: 15px;
                     font-weight: 700;
                 }
-                .title-menu:hover,
-                .title-menu[active],
-                .title-menu:focus-visible {
+                headerbar button.title-menu:hover,
+                headerbar button.title-menu[active],
+                headerbar button.title-menu:focus-visible,
+                headerbar button.title-menu:focus {
                     background-color: transparent;
+                    background-image: none;
+                    box-shadow: none;
+                    outline: none;
                 }
                 .title-menu-label { color: #ffffff; }
                 .title-menu-chevron {
