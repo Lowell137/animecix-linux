@@ -5,6 +5,40 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const BASE: &str = "https://animecix.tv";
+/// Manga bölümü. Anime `Episode`'inden ayrı: çevirmen var, `episode_number`
+/// kesirli olabiliyor (özel/ara bölümler), sayfa sayısı `episode_images`
+/// üzerinden hesaplanıyor.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MangaChapter {
+    #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
+    pub number: f64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub translator: String,
+    #[serde(default)]
+    pub release_date: String,
+    #[serde(default)]
+    pub page_count: usize,
+}
+
+/// Manga sayfası (görsel).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MangaPage {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub episode_id: u64,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+}
+
 /// Manga modundaki "kaldığın yer": sunucu geçmişindeki bir manga kaydı.
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct MangaHistory {
@@ -1394,10 +1428,16 @@ impl Client {
         Ok((out, total, last))
     }
 
-    /// Manga detayı: `/secure/titles/{id}`. Bölüm listesi okuyucuyla birlikte
-    /// gelecek; şimdilik künye için başlık nesnesi yeterli.
-    pub fn manga_title(&self, id: u64) -> Result<Title, String> {
-        let key = format!("manga_title:{id}");
+    /// Manga detayı: künye + bölümler + sayfalar.
+    ///
+    /// `episodes` ve `episode_images` alanları YALNIZCA imzalı istekte geliyor;
+    /// imzasız istek boş başlık döndürüyor (ölçüldü: 0 bölüm). Sayfalar
+    /// `episode_id` ile bölümlere bağlanıyor.
+    pub fn manga_detail(
+        &self,
+        id: u64,
+    ) -> Result<(Title, Vec<MangaChapter>, Vec<MangaPage>), String> {
+        let key = format!("manga_detail:{id}");
         let d = self.cache_get(&key, 900, |http| {
             let sig = crate::xeh::sign_query("")?;
             http.get(format!("{MANGA_BASE}/secure/titles/{id}"))
@@ -1411,12 +1451,71 @@ impl Client {
                 .json()
                 .map_err(|e| e.to_string())
         })?;
-        let mut t = Title::from_value_lenient(&d["title"])
-            .ok_or_else(|| "Manga künyesi okunamadı".to_string())?;
+        let raw = &d["title"];
+        let mut t = Title::from_value_lenient(raw).ok_or("Manga künyesi okunamadı")?;
         if t.title_type.is_none() {
             t.title_type = Some("manga".into());
         }
-        Ok(t)
+
+        let mut chapters: Vec<MangaChapter> = raw["episodes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|e| MangaChapter {
+                        id: Self::u64_field(e, "id"),
+                        number: e["episode_number"].as_f64().unwrap_or(0.0),
+                        name: Self::str_field(e, "name"),
+                        translator: e["translators"]
+                            .as_array()
+                            .and_then(|a| a.first())
+                            .and_then(|x| {
+                                x["translatorDetails"]["translator"]
+                                    .as_str()
+                                    .map(|s| s.to_string())
+                                    .or_else(|| {
+                                        x["translatorDetails"]["name"].as_str().map(|s| s.to_string())
+                                    })
+                            })
+                            .unwrap_or_default(),
+                        release_date: Self::str_field(e, "release_date"),
+                        page_count: 0,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        chapters.sort_by(|a, b| {
+            a.number
+                .partial_cmp(&b.number)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let pages: Vec<MangaPage> = raw["episode_images"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|p| MangaPage {
+                        id: Self::str_field(p, "id"),
+                        episode_id: Self::u64_field(p, "episode_id"),
+                        url: Self::str_field(p, "url"),
+                        width: p["width"].as_u64().unwrap_or(0) as u32,
+                        height: p["height"].as_u64().unwrap_or(0) as u32,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for c in chapters.iter_mut() {
+            c.page_count = pages.iter().filter(|p| p.episode_id == c.id).count();
+        }
+        Ok((t, chapters, pages))
+    }
+
+    /// Bir bölümün sayfaları, sıra korunarak.
+    pub fn manga_pages_of(pages: &[MangaPage], chapter: &MangaChapter) -> Vec<MangaPage> {
+        pages
+            .iter()
+            .filter(|p| p.episode_id == chapter.id)
+            .cloned()
+            .collect()
     }
 
     pub fn search(&self, q: &str, manga: bool) -> Result<Vec<Title>, String> {

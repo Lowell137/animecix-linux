@@ -121,6 +121,19 @@ impl CoverManager {
         self.load_cover_impl(&Self::thumb_url(&url, false), pic, w, h);
     }
 
+    /// Manga okuyucusu: sabit boyut istemeyen, kendi doğal boyutunda
+    /// (kaynak çözünürlükte) duran sayfa görseli. ScrolledWindow içinde
+    /// kaydırılır; `ContentFit::Contain` ile küçük pencerede de sığar.
+    pub fn manga_page_picture(&self, url: &str) -> gtk::Picture {
+        let pic = gtk::Picture::new();
+        pic.set_content_fit(gtk::ContentFit::Contain);
+        pic.set_halign(gtk::Align::Center);
+        pic.set_valign(gtk::Align::Center);
+        // 0x0 = kısıt yok; doku doğal boyutta pişirilir.
+        self.load_cover_impl(url, &pic, 0, 0);
+        pic
+    }
+
     /// Spot ışığı için tam boy (w1280) yükleme. TMDB dışı URL'ler
     /// olduğu gibi geçer (haber görselleri).
     pub fn cover_picture_hero(&self, url: Option<&str>, w: i32, h: i32) -> gtk::Picture {

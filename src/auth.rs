@@ -504,7 +504,9 @@ impl Client {
             )
         };
         let mut out = Vec::new();
-        for page in 0..3 {
+        // Tek sayfa yeterli (manga geçmişi kısa). 3 sayfa sırayla atmak
+        // hem yavaştı hem ilk bağlantı hatasında 3 kez toast çıkıyordu.
+        for page in 0..1 {
             let sig = crate::xeh::sign_query("").map_err(|e| e.to_string())?;
             let resp = http
                 .get(format!(
@@ -518,9 +520,23 @@ impl Client {
                 .header("Referer", "https://mangacix.net/")
                 .header("X-E-H", &sig)
                 .timeout(20)
-                .send()
-                .map_err(|e| e.to_string())?;
-            let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+                .send();
+            // Geçici bağlantı dalgalanması kullanıcıya hata olarak
+            // gösterilmemeli; manga geçmişi kritik değil.
+            let resp = match resp {
+                Ok(r) => r,
+                Err(e) => {
+                    eprintln!("[MANGA/GEÇMİŞ] bağlantı hatası, atlanıyor: {e}");
+                    return Ok(out);
+                }
+            };
+            let v: serde_json::Value = match resp.json() {
+                Ok(v) => v,
+                Err(e) => {
+                    eprintln!("[MANGA/GEÇMİŞ] ayrıştırma hatası, atlanıyor: {e}");
+                    return Ok(out);
+                }
+            };
             let Some(arr) = v["data"]["totalData"].as_array() else { break };
             for r in arr {
                 if !MANGA.contains(&r["title_type"].as_str().unwrap_or("")) {
