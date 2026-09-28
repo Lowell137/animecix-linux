@@ -507,6 +507,45 @@ fn main() {
                     box-shadow: inset 3px 0 0 @accent_color;
                 }
 
+                /* === Mod Geçişi (Başlık çubuğu ortası, AdwViewSwitcher düzeni) ===
+                   İkili birleşik hap: yarı saydam kapsayıcı + ince kenarlık,
+                   8px köşe, butonlar arasında boşluk yok. Aktif olan açık
+                   gri + kalın yazıyla öne çıkar. */
+                .mode-switch {
+                    background-color: rgba(255, 255, 255, 0.06);
+                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    border-radius: 8px;
+                    padding: 3px;
+                }
+                .mode-switch > button {
+                    min-height: 32px;
+                    min-width: 76px;
+                    padding: 0 16px;
+                    border-radius: 6px;
+                    background-color: transparent;
+                    background-image: none;
+                    border: none;
+                    box-shadow: none;
+                    color: #9a9996;
+                    font-size: 13px;
+                    font-weight: 500;
+                    transition: background-color 120ms ease, color 120ms ease;
+                }
+                .mode-switch > button:hover {
+                    background-color: rgba(255, 255, 255, 0.05);
+                    color: #ffffff;
+                }
+                .mode-switch > button:checked {
+                    background-color: rgba(255, 255, 255, 0.18);
+                    color: #ffffff;
+                    font-weight: 600;
+                    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+                }
+                /* Seçili buton hover'da da seçili görünmeli. */
+                .mode-switch > button:checked:hover {
+                    background-color: rgba(255, 255, 255, 0.22);
+                }
+
                 /* === Bookmark Butonu (eski floating) === */
                 .lg-icon { -gtk-icon-size: 20px; }
                 .bookmark-btn {

@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=AnimeciX
-GenericName=Anime İzleme Uygulaması
-Comment=Türkçe anime izleme istemcisi (mpv tabanlı)
+Name=AnimeciX · MangaCiX
+GenericName=Anime ve Manga İzleme Uygulaması
+Comment=Anime ve manga izleme istemcisi
 Exec=animecix
 Icon=animecix
 Terminal=false

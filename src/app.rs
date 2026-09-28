@@ -38,6 +38,11 @@ pub enum Page {
     /// yığın içinde başka bir sayfa. Okuyucu henüz taşınmadı; liste gerçek
     /// veriden geliyor.
     MangaHome,
+    /// Manga keşfi: tür filtresi (manga/manhwa/manhua/novel) + kart ızgarası.
+    MangaKesfet,
+    /// Manga detayı. Anime detay sayfası değil: bölüm sekmeleri/oynatma
+    /// anlamsız, okuyucu henüz taşınmadı.
+    MangaDetail { title: Title },
 }
 
 #[derive(Clone)]
@@ -65,8 +70,6 @@ pub(crate) enum SidebarId {
     Calendar,
     News,
     Downloads,
-    /// Anime <-> Manga modu anahtarı; menünün tepesinde durur.
-    Manga,
     Login,
     Collapse,
 }
@@ -94,7 +97,6 @@ fn dock_caption(id: SidebarId) -> Option<&'static str> {
         SidebarId::Calendar => Some("Takvim"),
         SidebarId::News => Some("Haber"),
         SidebarId::Downloads => Some("İndir"),
-        SidebarId::Manga => Some("Manga"),
         _ => None,
     }
 }
@@ -111,13 +113,15 @@ fn sidebar_id_key(id: SidebarId) -> Option<&'static str> {
         SidebarId::Downloads => Some("downloads"),
         // Manga anahtarı navigasyon satırı değil, durum anahtarı: kullanıcı
         // onu gizleyemez/taşıyamaz, her zaman görünür (Login/Collapse gibi).
-        SidebarId::Login | SidebarId::Collapse | SidebarId::Manga => None,
+        SidebarId::Login | SidebarId::Collapse => None,
     }
 }
 pub enum Msg {
     /// Manga ana sayfa verisi: (son bölümler şeridi, katalog başlıkları).
     /// MangaCiX'in kendi ana sayfası gibi iki kaynaktan geliyor.
-    MangaHome(Result<(Vec<LastEpisode>, Vec<Title>), String>),
+    MangaHome(Result<Vec<LastEpisode>, String>),
+    MangaKesfet(Result<(Vec<Title>, usize, u32), String>),
+    MangaTitle(Result<Title, String>),
     Cats(Result<Vec<api::Category>, String>),
     Search(Result<Vec<Title>, String>),
     Eps(Title, Result<Vec<Episode>, String>, Vec<(u64, u64, f64)>),
@@ -170,7 +174,6 @@ pub struct App {
     pub stack: gtk::Stack,
     pub back_btn: gtk::Button,
     pub refresh_btn: gtk::Button,
-    pub title_label: gtk::Label,
     pub loading: gtk::Box,
     pub toast: adw::ToastOverlay,
     pub settings_revealer: gtk::Revealer,
@@ -180,9 +183,9 @@ pub struct App {
     pub side_items: Rc<RefCell<Vec<SideItem>>>,
     pub side_collapse_btn: gtk::Button,
     /// Anime <-> Manga modu anahtarı ve o anki mod etiketi.
-    pub mode_btn: gtk::Button,
-    pub mode_lbl: gtk::Label,
-    pub mode_icon: gtk::Image,
+    /// Başlık çubuğundaki Anime | Manga ikili düğmesi.
+    pub mode_anime: gtk::ToggleButton,
+    pub mode_manga: gtk::ToggleButton,
     /// Sidebar üst barı (arama + menü düğmeleri).
     pub side_search_btn: gtk::Button,
     pub side_menu_btn: gtk::Button,
@@ -198,6 +201,12 @@ pub struct App {
     pub manga_cats: Rc<RefCell<Vec<api::Category>>>,
     /// Manga ana sayfasının "son bölümler" şeridi.
     pub manga_rail: Rc<RefCell<Vec<LastEpisode>>>,
+    /// Manga keşfi: seçili tür, sonuçlar, toplam, sayfa sayısı.
+    pub manga_tur: Rc<RefCell<String>>,
+    pub manga_items: Rc<RefCell<Vec<Title>>>,
+    pub manga_total: Rc<Cell<usize>>,
+    pub manga_last_page: Rc<Cell<u32>>,
+    pub manga_discover_loading: Rc<Cell<bool>>,
     /// O anki mod: true = manga. Ayar dosyasına yazılır.
     pub manga_mode: Rc<Cell<bool>>,
     pub search_results: Rc<RefCell<Vec<Title>>>,
@@ -454,6 +463,33 @@ fn aniskip_input_conf(t: &api::AniSkipTimes) -> String {
 }
 
 impl App {
+        // Mod anahtarı: anime <-> manga. Düğmenin etiketi ve ikonu o anki
+        // modu gösterir ("Manga Modu" / "Anime Modu") — hangi modda
+        // olduğun tek bakışta okunur.
+    /// Yan menü satırına tıklandığında açılacak sayfa. Ana Sayfa ve Keşfet
+    /// o anki moda göre değişir; gerisi ortak.
+    fn page_for_sidebar(&self, id: SidebarId) -> Page {
+        if self.manga_mode.get() {
+            match id {
+                SidebarId::Home => return Page::MangaHome,
+                SidebarId::Kesfet => return Page::MangaKesfet,
+                _ => {}
+            }
+        }
+        match id {
+            SidebarId::Home => Page::Home,
+            SidebarId::Kesfet => Page::Kesfet,
+            SidebarId::Favs => Page::Favs,
+            SidebarId::Marathon => Page::Marathon,
+            SidebarId::History => Page::History,
+            SidebarId::Calendar => Page::Calendar,
+            SidebarId::News => Page::News,
+            SidebarId::Downloads => Page::Downloads,
+            SidebarId::Login => Page::Account,
+            SidebarId::Collapse => Page::Home,
+        }
+    }
+
     pub fn new(app: &adw::Application) -> Rc<Self> {
         let client = Arc::new(Client::new());
 
@@ -467,11 +503,19 @@ impl App {
         let welcome_seen = client.is_welcome_seen();
 
         let header = adw::HeaderBar::new();
-        let title_label = gtk::Label::new(Some("AnimeciX"));
-        title_label.add_css_class("title-2");
-        title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title_label.set_max_width_chars(28);
-        header.set_title_widget(Some(&title_label));
+        // Mod geçişi başlık çubuğunun ortasında (AdwViewSwitcher düzeni):
+        // ikili, birleşik hap. Sayfa başlığı yerine geçtiği için
+        // `title_label` başlıktan kaldırıldı.
+        let mode_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        mode_box.add_css_class("mode-switch");
+        let mode_anime = gtk::ToggleButton::with_label("Anime");
+        let mode_manga = gtk::ToggleButton::with_label("Manga");
+        for b in [&mode_anime, &mode_manga] {
+            b.add_css_class("mode-btn");
+        }
+        mode_box.append(&mode_anime);
+        mode_box.append(&mode_manga);
+        header.set_title_widget(Some(&mode_box));
 
         let back_btn = gtk::Button::from_icon_name("go-previous-symbolic");
         back_btn.add_css_class("flat");
@@ -577,42 +621,6 @@ impl App {
         side_head.append(&side_head_spacer);
         side_head.append(&side_menu_btn);
         sidebar.append(&side_head);
-
-        // Mod anahtarı: anime <-> manga. Gezinme satırlarının hemen üstünde,
-        // ayraçla ayrılmış — "bundan sonrası anime" sinyali veriyor.
-        // side_row DEĞİL: o bir navigasyon satırı, bu bir durum anahtarı;
-        // aktif hali `suggested-action` ile boyanıyor.
-        let mode_btn = gtk::Button::new();
-        mode_btn.add_css_class("flat");
-        mode_btn.add_css_class("side-row");
-        mode_btn.add_css_class("mode-switch");
-        mode_btn.set_halign(gtk::Align::Fill);
-        let mode_inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        mode_inner.set_margin_top(6);
-        mode_inner.set_margin_bottom(6);
-        mode_inner.set_margin_start(10);
-        mode_inner.set_margin_end(10);
-        let mode_icon = gtk::Image::from_icon_name("comic-book-symbolic");
-        mode_icon.set_valign(gtk::Align::Center);
-        let mode_lbl = gtk::Label::new(Some("Manga Modu"));
-        mode_lbl.set_xalign(0.0);
-        mode_lbl.set_hexpand(true);
-        mode_inner.append(&mode_icon);
-        mode_inner.append(&mode_lbl);
-        mode_btn.set_child(Some(&mode_inner));
-        let mode_sep = gtk::Separator::new(gtk::Orientation::Horizontal);
-        mode_sep.set_margin_bottom(4);
-        sidebar.append(&mode_sep);
-        sidebar.append(&mode_btn);
-        side_items.borrow_mut().push(SideItem {
-            id: SidebarId::Manga,
-            btn: mode_btn.clone(),
-            label: mode_lbl.clone(),
-            icon: mode_icon.clone(),
-            avatar: None,
-            tip: "Anime ve manga arasında geç (Manga modu)",
-            full: "Manga Modu".to_string(),
-        });
 
         let home_btn = side_row(&sidebar, &side_items, SidebarId::Home, "Ana Sayfa", "go-home-symbolic", "Ana Sayfa");
         let kesfet_btn = side_row(&sidebar, &side_items, SidebarId::Kesfet, "Keşfet", "view-grid-symbolic", "Keşfet");
@@ -751,7 +759,7 @@ impl App {
         // Maksimum sınırlanmaz (büyütme/tam ekran serbest).
         let window = adw::ApplicationWindow::builder()
             .application(app)
-            .title("AnimeciX")
+            .title("AnimeciX · MangaCiX")
             .default_width(1479)
             .default_height(845)
             .content(&root_overlay)
@@ -780,7 +788,6 @@ impl App {
             stack: main_stack,
             back_btn,
             refresh_btn,
-            title_label,
             loading,
             toast,
             settings_revealer,
@@ -789,9 +796,8 @@ impl App {
             sidebar_revealer,
             side_items: side_items.clone(),
             side_collapse_btn,
-            mode_btn: mode_btn.clone(),
-            mode_lbl: mode_lbl.clone(),
-            mode_icon: mode_icon.clone(),
+            mode_anime: mode_anime.clone(),
+            mode_manga: mode_manga.clone(),
             side_search_btn,
             side_menu_btn,
             side_head,
@@ -803,6 +809,11 @@ impl App {
             cats: Rc::new(RefCell::new(Vec::new())),
             manga_cats: Rc::new(RefCell::new(Vec::new())),
             manga_rail: Rc::new(RefCell::new(Vec::new())),
+            manga_tur: Rc::new(RefCell::new(String::new())),
+            manga_items: Rc::new(RefCell::new(Vec::new())),
+            manga_total: Rc::new(Cell::new(0)),
+            manga_last_page: Rc::new(Cell::new(1)),
+            manga_discover_loading: Rc::new(Cell::new(false)),
             manga_mode: Rc::new(Cell::new(false)),
             search_results: Rc::new(RefCell::new(Vec::new())),
             settings: Rc::new(RefCell::new(client.load_settings())),
@@ -965,7 +976,6 @@ impl App {
             stack: self.stack.clone(),
             back_btn: self.back_btn.clone(),
             refresh_btn: self.refresh_btn.clone(),
-            title_label: self.title_label.clone(),
             loading: self.loading.clone(),
             toast: self.toast.clone(),
             settings_revealer: self.settings_revealer.clone(),
@@ -981,13 +991,17 @@ impl App {
             pal_cache: self.pal_cache.clone(),
             client: self.client.clone(),
             covers: self.covers.clone_ref(),
-            mode_btn: self.mode_btn.clone(),
-            mode_lbl: self.mode_lbl.clone(),
-            mode_icon: self.mode_icon.clone(),
+            mode_anime: self.mode_anime.clone(),
+            mode_manga: self.mode_manga.clone(),
             page_history: self.page_history.clone(),
             cats: self.cats.clone(),
             manga_cats: self.manga_cats.clone(),
             manga_rail: self.manga_rail.clone(),
+            manga_tur: self.manga_tur.clone(),
+            manga_items: self.manga_items.clone(),
+            manga_total: self.manga_total.clone(),
+            manga_last_page: self.manga_last_page.clone(),
+            manga_discover_loading: self.manga_discover_loading.clone(),
             manga_mode: self.manga_mode.clone(),
             search_results: self.search_results.clone(),
             settings: self.settings.clone(),
@@ -1079,12 +1093,19 @@ impl App {
             });
         }
 
-        // Mod anahtarı: anime <-> manga. Düğmenin etiketi ve ikonu o anki
-        // modu gösterir ("Manga Modu" / "Anime Modu") — hangi modda
-        // olduğun tek bakışta okunur.
         {
-            let this = self.clone_ref();
-            self.mode_btn.connect_clicked(move |_| this.toggle_mode());
+            let ta = self.clone_ref();
+            self.mode_anime.connect_toggled(move |_| {
+                if ta.mode_anime.is_active() && ta.manga_mode.get() {
+                    ta.toggle_mode();
+                }
+            });
+            let tm = self.clone_ref();
+            self.mode_manga.connect_toggled(move |_| {
+                if tm.mode_manga.is_active() && !tm.manga_mode.get() {
+                    tm.toggle_mode();
+                }
+            });
         }
 
         // Hamburger menü: Ayarlar + Hakkında (doğrudan butonlu popover;
@@ -1137,22 +1158,23 @@ impl App {
             });
         }
 
-        // Sayfa satırları: Ana Sayfa / Favoriler / Maraton / Geçmiş / Takvim / Haberler / Hesap.
-        // (Ayarlar hamburger menüden açılır; vurgusu yok.)
-        for (id, page) in [
-            (SidebarId::Home, Page::Home),
-            (SidebarId::Kesfet, Page::Kesfet),
-            (SidebarId::Favs, Page::Favs),
-            (SidebarId::Marathon, Page::Marathon),
-            (SidebarId::History, Page::History),
-            (SidebarId::Calendar, Page::Calendar),
-            (SidebarId::News, Page::News),
-            (SidebarId::Downloads, Page::Downloads),
-            (SidebarId::Login, Page::Account),
+        // Ana Sayfa ve Keşfet moddan bağımlı: anime modunda anime sayfası,
+        // manga modunda karşılığı açılır. Diğerleri ortak.
+        for id in [
+            SidebarId::Home,
+            SidebarId::Kesfet,
+            SidebarId::Favs,
+            SidebarId::Marathon,
+            SidebarId::History,
+            SidebarId::Calendar,
+            SidebarId::News,
+            SidebarId::Downloads,
+            SidebarId::Login,
         ] {
             if let Some(b) = find_btn(&self.side_items, id) {
                 let this = self.clone_ref();
                 b.connect_clicked(move |_| {
+                    let page = this.page_for_sidebar(id);
                     let mut st = this.page_history.borrow_mut();
                     if st.last() != Some(&page) {
                         st.push(page.clone());
@@ -1160,7 +1182,13 @@ impl App {
                     drop(st);
                     this.show_page(&page);
                     if id == SidebarId::Home {
-                        this.fetch_home();
+                        if this.manga_mode.get() {
+                            if this.manga_rail.borrow().is_empty() {
+                                this.fetch_manga_home();
+                            }
+                        } else {
+                            this.fetch_home();
+                        }
                     }
                     this.auto_refresh(&page);
                 });
@@ -1857,41 +1885,33 @@ impl App {
 
         match page {
             Page::Welcome => {
-                self.title_label.set_text("Hoş Geldiniz");
                 switch(&self.stack, "welcome", gtk::StackTransitionType::Crossfade, self.build_welcome_view());
             }
             Page::Home => {
-                self.title_label.set_text("AnimeciX");
                 switch(&self.stack, "home", gtk::StackTransitionType::Crossfade, self.build_home_view());
             }
             Page::Favs => {
-                self.title_label.set_text("Favorilerim");
                 switch(&self.stack, "favs", gtk::StackTransitionType::Crossfade, self.build_favs_view());
             }
             Page::Marathon => {
-                self.title_label.set_text("İzleme Maratonum");
                 switch(&self.stack, "marathon", gtk::StackTransitionType::Crossfade, self.build_marathon_view());
             }
             Page::History => {
-                self.title_label.set_text("İzleme Geçmişi");
                 switch(&self.stack, "history", gtk::StackTransitionType::Crossfade, self.build_history_view());
             }
             Page::Calendar => {
-                self.title_label.set_text("Yayın Takvimi");
                 if self.cal_days.borrow().is_empty() && !self.cal_loading.get() {
                     self.fetch_calendar();
                 }
                 switch(&self.stack, "calendar", gtk::StackTransitionType::Crossfade, self.build_calendar_view());
             }
             Page::News => {
-                self.title_label.set_text("Haberler");
                 if self.news_page.get() == 0 && !self.news_loading.get() {
                     self.fetch_news_page(1);
                 }
                 switch(&self.stack, "news", gtk::StackTransitionType::Crossfade, self.build_news_view());
             }
             Page::Kesfet => {
-                self.title_label.set_text("Keşfet");
                 if self.dis_items.borrow().is_empty()
                     && !self.dis_loading.get()
                     && self.dis_error.borrow().is_none()
@@ -1901,11 +1921,9 @@ impl App {
                 switch(&self.stack, "kesfet", gtk::StackTransitionType::Crossfade, self.build_kesfet_view());
             }
             Page::NewsDetail(item) => {
-                self.title_label.set_text(&item.title);
                 switch(&self.stack, "news_detail", gtk::StackTransitionType::SlideLeft, self.build_news_detail_view(item));
             }
             Page::Reviews { title_id, title_name } => {
-                self.title_label.set_text(&format!("İncelemeler: {title_name}"));
                 if self.rev_title.get() != *title_id || (self.rev_page.get() == 0 && !self.rev_loading.get()) {
                     self.rev_title.set(*title_id);
                     *self.rev_name.borrow_mut() = title_name.clone();
@@ -1917,34 +1935,38 @@ impl App {
                 switch(&self.stack, "reviews", gtk::StackTransitionType::SlideLeft, self.build_reviews_view());
             }
             Page::Search => {
-                self.title_label.set_text("Arama Sonuçları");
                 switch(&self.stack, "search", gtk::StackTransitionType::SlideLeft, self.build_search_view());
             }
             Page::Episodes { title, eps } | Page::Movie { title, eps } => {
-                self.title_label.set_text(&title.name);
                 let page_name = format!("eps_{}", title.id);
                 switch(&self.stack, &page_name, gtk::StackTransitionType::SlideLeft, self.build_episodes_view(title, eps));
             }
             Page::Player { title, ep } => {
-                self.title_label.set_text(&format!("{} | S{:02}E{:02}", title.name, ep.season, ep.episode));
                 switch(&self.stack, "player", gtk::StackTransitionType::SlideLeft, self.build_player_view());
             }
             Page::Account => {
-                self.title_label.set_text("Hesap");
                 // Takip sayısı güncel gelsin (5dk korumalı, döngü yapmaz).
                 self.fetch_server_history(false);
                 switch(&self.stack, "account", gtk::StackTransitionType::Crossfade, self.build_account_view());
             }
             Page::CustomList { name, titles } => {
-                self.title_label.set_text(name);
                 switch(&self.stack, "custom_list", gtk::StackTransitionType::SlideLeft, self.build_custom_list_view(name, titles));
             }
             Page::Downloads => {
-                self.title_label.set_text("İndirilenler");
                 switch(&self.stack, "downloads", gtk::StackTransitionType::Crossfade, self.build_downloads_view());
             }
+            Page::MangaKesfet => {
+                if self.manga_items.borrow().is_empty() && !self.manga_discover_loading.get() {
+                    self.manga_discover_loading.set(true);
+                    let tur = self.manga_tur.borrow().clone();
+                    self.fetch_manga_kesfet(&tur, 1);
+                }
+                switch(&self.stack, "manga_kesfet", gtk::StackTransitionType::Crossfade, self.build_manga_kesfet_view());
+            }
+            Page::MangaDetail { title } => {
+                switch(&self.stack, &format!("manga_det_{}", title.id), gtk::StackTransitionType::SlideLeft, self.build_manga_detail_view(title));
+            }
             Page::MangaHome => {
-                self.title_label.set_text("Manga");
                 switch(&self.stack, "manga_home", gtk::StackTransitionType::Crossfade, self.build_manga_home_view());
             }
         }
@@ -3074,34 +3096,154 @@ impl App {
         }
     }
 
-    /// Mod düğmesinin etiket/ikon/renkini güncelle. Etiket o anki modu
-    /// değil, GEÇİŞİ anlatır ("Manga Modu" iken anime'ye dönüş).
+    /// Mod düğmelerinin durumunu güncelle. İkisi de ToggleButton olduğu için
+    /// aktif olan `set_active(true)` ile öne çıkar; boyayı CSS halleder.
     fn paint_mode_button(&self) {
         let manga = self.manga_mode.get();
-        self.mode_lbl.set_text(if manga { "Anime Modu" } else { "Manga Modu" });
-        self.mode_icon
-            .set_from_icon_name(Some(if manga { "video-symbolic" } else { "comic-book-symbolic" }));
-        self.mode_btn.set_tooltip_text(Some(if manga {
-            "AnimeciX'e dön (Anime modu)"
-        } else {
-            "Manga moduna geç"
-        }));
-        if manga {
-            self.mode_btn.add_css_class("suggested-action");
-        } else {
-            self.mode_btn.remove_css_class("suggested-action");
+        // Tıklamayı yine biz üretiyoruz: iki butonu da birden aktif etmeyelim.
+        if self.mode_anime.is_active() != !manga {
+            self.mode_anime.set_active(!manga);
+        }
+        if self.mode_manga.is_active() != manga {
+            self.mode_manga.set_active(manga);
         }
     }
 
-    fn fetch_manga_home(&self) {
-        eprintln!("[MANGA] son bölümler + katalog çekiliyor");
+    pub fn open_manga_detail(&self, title: Title) {
+        self.busy(true);
+        let tid = title.id;
+        let fallback = title.clone();
         self.spawn(move |c| {
-            // MangaCiX'in ana sayfası da iki kaynaktan kuruluyor; ikisi de
-            // hata verirse sayfa yine de çizilsin diye hata yutulur.
-            let eps = c.manga_last_episodes(1).map(|(v, _, _)| v).unwrap_or_default();
-            let cat = c.manga_catalog().unwrap_or_default();
-            move || Msg::MangaHome(Ok((eps, cat)))
+            let res = c.manga_title(tid);
+            move || Msg::MangaTitle(res.map_err(|e| {
+                // Künye gelmezse elimizdeki başlığı kullanmaya devam et.
+                let _ = &fallback;
+                e
+            }))
         });
+        self.show_page(&Page::MangaDetail { title });
+    }
+
+    /// Manga tür filtresi: boş = tümü.
+    pub fn fetch_manga_kesfet(&self, tur: &str, page: u32) {
+        let t = tur.to_string();
+        self.spawn(move |c| {
+            let res = c.manga_discover(&t, page);
+            move || Msg::MangaKesfet(res)
+        });
+    }
+
+    /// Manga keşfi: tür çipleri + sayfalı kart ızgarası.
+    fn build_manga_kesfet_view(&self) -> gtk::ScrolledWindow {
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hexpand(true);
+        scroll.set_vexpand(true);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 14);
+        root.set_margin_top(14);
+        root.set_margin_bottom(18);
+        root.set_margin_start(12);
+        root.set_margin_end(12);
+
+        // Tür seçici: "Tümü" + MangaCiX'in dört türü. Seçim anında
+        // listeyi yeniden çekiyoruz.
+        let chips = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        chips.set_halign(gtk::Align::Start);
+        let sel = self.manga_tur.clone();
+
+        // `value` ömür boyu yaşamalı (buton tıklamasında saklanıyor).
+        fn chip(
+            value: &'static str,
+            label: &str,
+            sel: Rc<RefCell<String>>,
+            cur: &str,
+        ) -> gtk::ToggleButton {
+            let b = gtk::ToggleButton::with_label(label);
+            b.add_css_class("pill");
+            b.set_active(value == cur);
+            if value == cur {
+                b.add_css_class("suggested-action");
+            }
+            let s = sel.clone();
+            b.connect_clicked(move |_| {
+                *s.borrow_mut() = value.to_string();
+            });
+            b
+        }
+
+        {
+            let cur = self.manga_tur.borrow().clone();
+            chips.append(&chip("", "Tümü", sel.clone(), &cur));
+            for (v, lbl) in api::MANGA_TYPES {
+                chips.append(&chip(v, lbl, sel.clone(), &cur));
+            }
+        }
+        root.append(&chips);
+
+        let items = self.manga_items.borrow().clone();
+        if items.is_empty() {
+            let box_ = gtk::Box::new(gtk::Orientation::Vertical, 12);
+            box_.set_vexpand(true);
+            box_.set_valign(gtk::Align::Center);
+            let sp = gtk::Spinner::new();
+            sp.set_size_request(40, 40);
+            sp.start();
+            let lbl = gtk::Label::new(Some("Manga kataloğu yükleniyor…"));
+            lbl.add_css_class("dim-label");
+            box_.append(&sp);
+            box_.append(&lbl);
+            root.append(&box_);
+        } else {
+            let mut cards = Vec::new();
+            for t in items.iter() {
+                let this_open = self.clone_ref();
+                cards.push(self.std_poster_card(t, None, true, move |tt| {
+                    this_open.open_manga_detail(tt);
+                }));
+            }
+            root.append(&Self::poster_grid(cards, self.grid_cols.get(), true));
+        }
+        scroll.set_child(Some(&root));
+        scroll
+    }
+
+    fn fetch_manga_home(&self) {
+        eprintln!("[MANGA] son bölümler çekiliyor");
+        self.spawn(move |c| {
+            let res = c.manga_last_episodes(1).map(|(v, _, _)| v);
+            move || Msg::MangaHome(res)
+        });
+    }
+
+    /// Manga detay görünümü: künye + kapak. Anime detayının bölüm sekmeleri
+    /// ve oynatma düğmesi burada anlamsız; okuyucu taşınana kadar bölüm
+    /// listesi gösterilmiyor ve bu durum açıkça yazılıyor.
+    fn build_manga_detail_view(&self, title: &Title) -> gtk::ScrolledWindow {
+        let scroll = gtk::ScrolledWindow::new();
+        scroll.set_hexpand(true);
+        scroll.set_vexpand(true);
+        let root = gtk::Box::new(gtk::Orientation::Vertical, 18);
+        root.set_margin_top(18);
+        root.set_margin_bottom(18);
+        root.set_margin_start(12);
+        root.set_margin_end(12);
+
+        let poster = self.covers.cover_picture_hd(title.poster.as_deref(), 260, 390);
+        poster.set_valign(gtk::Align::Start);
+        root.append(&episodes_view::create_title_detail_header(title, &poster));
+        if let Some(desc) = episodes_view::create_detail_description(title) {
+            root.append(&desc);
+        }
+
+        // Okuyucu sıradaki adım; bunu uydurma yerine açıkça söylüyoruz.
+        let note = gtk::Label::new(Some(
+            "Manga okuyucusu henüz taşınmadı. Bölümler yakında burada açılacak.",
+        ));
+        note.add_css_class("dim-label");
+        note.set_margin_top(12);
+        root.append(&note);
+
+        scroll.set_child(Some(&root));
+        scroll
     }
 
     /// Manga ana sayfası. Okuyucu henüz taşınmadı; liste gerçek veriden
@@ -3114,6 +3256,7 @@ impl App {
         // durum sayfası göster, yeniden dene.
         let rail = self.manga_rail.borrow().clone();
         let cats = self.manga_cats.borrow().clone();
+        eprintln!("[MANGA/ÇİZİM] ray {} kayıt, kategori {} adet", rail.len(), cats.len());
         if cats.is_empty() && rail.is_empty() {
             let box_ = gtk::Box::new(gtk::Orientation::Vertical, 16);
             box_.set_valign(gtk::Align::Center);
@@ -3804,9 +3947,9 @@ impl App {
     pub fn show_about(&self) {
         let w = adw::AboutWindow::builder()
             .transient_for(&self.window)
-            .application_name("AnimeciX")
+            .application_name("AnimeciX · MangaCiX")
             .version(env!("CARGO_PKG_VERSION"))
-            .comments("animecix.tv masaüstü istemcisi")
+            .comments("animecix.tv ve mangacix.net masaüstü istemcisi")
             .website("https://animecix.tv")
             .build();
         w.present();
@@ -6472,11 +6615,12 @@ impl App {
                         }
                     }
                     // Yalnız bu detay sayfasındayken.
+                    // `add_named` verilen ad Stack'in visible_child_name'inde
+                    // durur; widget'ın kendi adı oraya yazılmıyor.
                     let on_detail = this_k
                         .stack
-                        .visible_child()
-                        .map(|c| c.widget_name() == page_name)
-                        .unwrap_or(false);
+                        .visible_child_name()
+                        .is_some_and(|n| n == page_name);
                     if !on_detail {
                         return glib::Propagation::Proceed;
                     }
@@ -6898,26 +7042,62 @@ impl App {
 
     fn handle_msg(&self, msg: Msg) {
         match msg {
+            Msg::MangaKesfet(res) => {
+                self.manga_discover_loading.set(false);
+                match res {
+                    Ok((titles, total, last)) => {
+                        eprintln!("[MANGA/KEŞFET] {} başlık, {} toplam", titles.len(), total);
+                        *self.manga_items.borrow_mut() = titles;
+                        self.manga_total.set(total);
+                        self.manga_last_page.set(last);
+                        if self
+                            .stack
+                            .visible_child_name()
+                            .is_some_and(|n| n == "manga_kesfet")
+                        {
+                            self.show_page(&Page::MangaKesfet);
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("[MANGA/KEŞFET] HATA: {e}");
+                        self.show_error(&e)
+                    }
+                }
+            }
+            Msg::MangaTitle(res) => match res {
+                Ok(t) => {
+                    if let Some(Page::MangaDetail { title }) =
+                        self.page_history.borrow().last().cloned()
+                    {
+                        if title.id == t.id {
+                            self.show_page(&Page::MangaDetail { title: t });
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("[MANGA] detay hatası: {e}");
+                    self.show_error(&e)
+                }
+            },
             Msg::MangaHome(res) => match res {
-                Ok((eps, titles)) => {
-                    eprintln!(
-                        "[MANGA] {} son bölüm + {} katalog başlığı",
-                        eps.len(),
-                        titles.len()
-                    );
-                    *self.manga_cats.borrow_mut() = if titles.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![api::Category { name: "Katalog".to_string(), items: titles }]
-                    };
+                Ok(eps) => {
+                    eprintln!("[MANGA] {} son bölüm", eps.len());
                     *self.manga_rail.borrow_mut() = eps;
+                    let vis = self
+                        .stack
+                        .visible_child_name()
+                        .map(|n| n.to_string())
+                        .unwrap_or_else(|| "<yok>".into());
+                    eprintln!(
+                        "[MANGA] görünür sayfa = {vis:?}, rayda {} kayıt",
+                        self.manga_rail.borrow().len()
+                    );
                     // Geçmişe bakma: mod düğmesi show_page çağırıyor ama
                     // history'ye eklemiyor. Görünür yığın çocuğuna bakalım.
                     if self
                         .stack
-                        .visible_child()
-                        .map(|c| c.widget_name() == "manga_home")
-                        .unwrap_or(false)
+                        .visible_child_name()
+                        .is_some_and(|n| n == "manga_home")
                     {
                         self.show_page(&Page::MangaHome);
                     }
@@ -7415,6 +7595,13 @@ impl App {
     }
 
     pub fn open_episodes(&self, title: Title) {
+        // Manga modundayken anime detay sayfası yanlış sayfa: bölüm sekmeleri,
+        // oynatma düğmesi ve "Tür: Dizi" burada anlamsız. Mod, kartın
+        // nereye gideceğini burada tek noktadan belirliyor.
+        if self.manga_mode.get() {
+            self.open_manga_detail(title);
+            return;
+        }
         self.busy(true);
         // Detay zenginleştirme (benzerler + künye + incelemeler) sessizce.
         self.det_title.set(title.id);
