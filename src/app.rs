@@ -807,8 +807,10 @@ impl App {
             rev_scrim.set_reveal_child(false);
         });
 
-        // Pencere boyutu sabit: ölçülen 1479x845 (açılış + minimum).
-        // Maksimum sınırlanmaz (büyütme/tam ekran serbest).
+        // Pencere serbestçe boyutlanabilir. `set_size_request` ile 1479x845
+        // bir ALT SINIR konmuştu; kullanıcı pencereyi küçültemiyor,
+        // dikey büyütünce de içerik ekranı taşıyordu. Izgara sütun sayısı
+        // zaten genişliğe göre yeniden hesaplanıyor.
         let window = adw::ApplicationWindow::builder()
             .application(app)
             .title("AnimeciX · MangaCiX")
@@ -816,7 +818,6 @@ impl App {
             .default_height(845)
             .content(&root_overlay)
             .build();
-        window.set_size_request(1479, 845);
 
         // Uygulama daima anime modunda açılır. Mod ayarlarda saklanıyor
         // ama açılışta uygulanmıyor: kaldığı yerden devam eden kullanıcı
