@@ -28,6 +28,18 @@ pub fn fmt_time(s: f64) -> String {
 // RenderContext — libmpv OpenGL render API safe wrapper
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Yayın tampon tavanları — harici mpv (`app.rs`) ve gömülü mpv ortak kullanır.
+// ---------------------------------------------------------------------------
+
+/// Varsayılanlar 128MiB + 32MiB + 120 saniye lookahead idi; mpv iki dakikalık
+/// videoyu kesintisiz RAM'de tutuyordu. 1080p bir akış ~1 MB/s olduğu için
+/// 32 MiB ~32 saniyelik tampon demek; `cache-pause=yes` zaten takılmayı
+/// karşılıyor. Hız düşmez, bellek ~120 MiB azalır.
+pub(crate) const DEMUXER_MAX_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) const DEMUXER_MAX_BACK_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const CACHE_SECS: u64 = 30;
+
 type Callback = Box<dyn Fn() + Send + 'static>;
 
 /// `mpv_render_context`. Sadece GL thread'inde (GTK main) kullanılmalı.
@@ -383,10 +395,10 @@ impl MpvEmbed {
         set_opt(ctx, "hr-seek", "yes");
         set_opt(ctx, "keep-open", "yes");
         set_opt(ctx, "cache", "yes");
-        set_opt(ctx, "demuxer-max-bytes", "134217728");
-        set_opt(ctx, "demuxer-max-back-bytes", "33554432");
-        set_opt(ctx, "demuxer-readahead-secs", "120");
-        set_opt(ctx, "cache-secs", "120");
+        set_opt(ctx, "demuxer-max-bytes", &DEMUXER_MAX_BYTES.to_string());
+        set_opt(ctx, "demuxer-max-back-bytes", &DEMUXER_MAX_BACK_BYTES.to_string());
+        set_opt(ctx, "demuxer-readahead-secs", &CACHE_SECS.to_string());
+        set_opt(ctx, "cache-secs", &CACHE_SECS.to_string());
         set_opt(ctx, "network-timeout", "10");
         set_opt(
             ctx,
@@ -595,5 +607,19 @@ impl Drop for MpvEmbed {
     fn drop(&mut self) {
         // RenderContext HER ZAMAN bundan önce düşürülmeli (sıralama kuralı).
         unsafe { libmpv_sys::mpv_terminate_destroy(self.ctx) };
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn stream_cache_stays_within_budget() {
+        // Regresyon koruması: mpv iki dakikalık videoyu RAM'de tutmasın.
+        // 1080p akış ~1 MB/s; 32 MiB ~32 s tampon, takılma için fazlasıyla.
+        assert!(super::DEMUXER_MAX_BYTES <= 32 * 1024 * 1024);
+        assert!(super::DEMUXER_MAX_BACK_BYTES <= 8 * 1024 * 1024);
+        assert!(super::CACHE_SECS >= 20 && super::CACHE_SECS <= 60);
+        // Geri okuma tamponu ileri okumadan büyük olmamalı.
+        assert!(super::DEMUXER_MAX_BACK_BYTES < super::DEMUXER_MAX_BYTES);
     }
 }

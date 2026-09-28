@@ -331,6 +331,20 @@ pub(crate) fn resolve_upscale_shader(name: &str) -> Option<String> {
     candidates.into_iter().find(|p| p.exists()).map(|p| p.to_string_lossy().into_owned())
 }
 
+/// Kare en son monitörde tam ekran gösterildiği için, x2 upscale'in anlamlı
+/// olup olmadığına monitörün dikey çözünürlüğüne bakarak karar veriyoruz.
+/// Pencere realize edilmemişse listedeki ilk monitöre düşer.
+pub(crate) fn output_height_for_upscale(w: &impl gtk::prelude::IsA<gtk::Native>) -> Option<u32> {
+    gtk::gdk::Display::default()
+        .and_then(|d| {
+            w.surface()
+                .and_then(|s| d.monitor_at_surface(&s))
+                .or_else(|| d.monitors().item(0).and_downcast::<gtk::gdk::Monitor>())
+        })
+        .map(|m| m.geometry().height().max(0) as u32)
+        .filter(|h: &u32| *h > 0)
+}
+
 fn aniskip_input_conf(t: &api::AniSkipTimes) -> String {
     let fmt_sec = |sec: f64| -> String {
         let s = sec as u64;
@@ -7581,6 +7595,9 @@ impl App {
             if use_proxy {
                 eprintln!("[SUP] yerel proxy aktif (127.0.0.1:10808), mpv oradan çıkacak");
             }
+            // GDK yalnız ana thread'de çağrılabilir; aşağıdaki supervisor
+            // thread'ine burada ölçüp taşıyoruz.
+            let output_height = output_height_for_upscale(&self.window);
             std::thread::spawn(move || {
                 'supervisor: for i in 0..total {
                     let url: String = if i < candidates.len() {
@@ -7606,12 +7623,12 @@ impl App {
                     cmd.arg(format!("--input-conf={input_conf_path_c}"));
                     cmd.args(saved_pos_c.map(|p| format!("--start={p:.1}")).as_slice())
                         .arg("--cache=yes")
-                        .arg("--demuxer-max-bytes=128MiB")
-                        .arg("--demuxer-max-back-bytes=32MiB")
-                        .arg("--demuxer-readahead-secs=120")
+                        .arg(format!("--demuxer-max-bytes={}", crate::embed_mpv::DEMUXER_MAX_BYTES))
+                        .arg(format!("--demuxer-max-back-bytes={}", crate::embed_mpv::DEMUXER_MAX_BACK_BYTES))
+                        .arg(format!("--demuxer-readahead-secs={}", crate::embed_mpv::CACHE_SECS))
                         .arg("--cache-pause=yes")
                         .arg("--cache-pause-wait=3")
-                        .arg("--cache-secs=120")
+                        .arg(format!("--cache-secs={}", crate::embed_mpv::CACHE_SECS))
                         .arg("--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5")
                         .arg("--network-timeout=10")
                         .arg("--hwdec=auto-safe")
@@ -7621,7 +7638,7 @@ impl App {
                             "ultra" => resolve_upscale_shader("Anime4K_Upscale_CNN_x2_UL.glsl"),
                             "hafif_keskin" => resolve_upscale_shader("Anime4K_Upscale_DTD_x2.glsl"),
                             _ => None,
-                        }.as_deref(), None))
+                        }.as_deref(), output_height))
                         .arg(url.as_str());
                     if url.contains("video.sibnet.ru/v/") {
                         let vid = url

@@ -283,14 +283,18 @@ fn cli_args_to_opts(args: &[String]) -> Vec<(String, String)> {
     out
 }
 
-fn upscale_opts(upscale: &str) -> Vec<(String, String)> {
+fn upscale_opts(upscale: &str, w: &impl gtk::prelude::IsA<gtk::Native>) -> Vec<(String, String)> {
     let shader = match upscale {
         "hafif" => resolve_upscale_shader("Anime4K_Upscale_DTD_x2.glsl"),
         "ultra" => resolve_upscale_shader("Anime4K_Upscale_CNN_x2_UL.glsl"),
         "hafif_keskin" => resolve_upscale_shader("Anime4K_Upscale_DTD_x2.glsl"),
         _ => None,
     };
-    let args = api::upscale_mpv_args(upscale, shader.as_deref(), None);
+    let args = api::upscale_mpv_args(
+        upscale,
+        shader.as_deref(),
+        crate::app::output_height_for_upscale(w),
+    );
     cli_args_to_opts(&args)
 }
 
@@ -1086,7 +1090,7 @@ pub fn build_embedded_player(
         return None;
     }
 
-    let opts = upscale_opts(&req.upscale);
+    let opts = upscale_opts(&req.upscale, main_window);
     let opts_ref: Vec<(&str, &str)> = opts.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
     let player = match MpvEmbed::new(proxy_url().as_deref(), req.saved_pos, &opts_ref) {
         Ok(p) => p,

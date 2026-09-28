@@ -705,55 +705,47 @@ pub fn marathon_summary(fracs: &[f64]) -> (usize, u32) {
 
 /// Upscale için mpv argümanlarını üretir.
 ///
-/// `video_height` biliniyorsa (mpv açılmadan önceki metadata) akıllı skip uygular:
-///   - video >= 1080p ise shader (hafif/ultra/hafif_keskin) GPU'yu boşa yakar,
-///     sadece hafif_keskin ise unsharp vf uygulanır (shader atlanır).
-///   - video < 1080p ise normal akış: shader + unsharp.
+/// `output_height`, karenin en son gösterileceği yüksekliktir — genelde
+/// monitörün dikey çözünürlüğü. Kaynak zaten bu çözünürlüğe ulaşıyorsa
+/// x2 upscale saf iş yüküdür: 4 kat piksel hesaplanır, 3/4'ü panele
+/// sığmayıp atılır. O durumda shader atlanır; `hafif_keskin` keskinliği
+/// unsharp ile korur, `hafif`/`ultra` argüman üretmez.
+///
+/// Kaynak yüksekliği mpv dosyayı açmadan bilinmez (`video-params/h` ancak
+/// sonra dolar), bu yüzden harici oynatıcıda çıktı çözünürlüğüne bakılır.
 pub(crate) fn upscale_mpv_args(
     upscale: &str,
     shader_path: Option<&str>,
-    video_height: Option<u32>,
+    output_height: Option<u32>,
 ) -> Vec<String> {
-    let skip_shader = matches!(video_height, Some(h) if h >= 1080)
-        && matches!(upscale, "hafif" | "ultra" | "hafif_keskin");
+    // ponytail: monitör 1080p'yse x2 upscale her kaynakta boşa iş —
+    // yalnız 480p içerikte Anime4K hafif fark yaratırdı. 4K panele
+    // geçince ya da kaynak yüksekliği bilinir olunca kural gözden geçirilir.
+    let skip_shader = matches!(output_height, Some(h) if h >= 1080);
 
     match upscale {
         "sharp" => vec![
             "--scale=ewa_lanczossharp".into(),
             "--cscale=ewa_lanczossharp".into(),
         ],
-        "hafif" => {
+        "hafif" | "ultra" => {
             if skip_shader {
                 Vec::new()
             } else {
-                match shader_path {
-                    Some(p) => vec![format!("--glsl-shaders={p}")],
-                    None => Vec::new(),
-                }
-            }
-        }
-        "ultra" => {
-            if skip_shader {
-                Vec::new()
-            } else {
-                match shader_path {
-                    Some(p) => vec![format!("--glsl-shaders={p}")],
-                    None => Vec::new(),
-                }
+                shader_path
+                    .map(|p| vec![format!("--glsl-shaders={p}")])
+                    .unwrap_or_default()
             }
         }
         "hafif_keskin" => {
-            if skip_shader {
-                vec!["--vf=unsharp=5:5:1.0:5:5:0.4".into()]
-            } else {
-                match shader_path {
-                    Some(p) => vec![
-                        format!("--glsl-shaders={p}"),
-                        "--vf=unsharp=5:5:1.0:5:5:0.4".into(),
-                    ],
-                    None => vec!["--vf=unsharp=5:5:1.0:5:5:0.4".into()],
+            let mut v = Vec::new();
+            if !skip_shader {
+                if let Some(p) = shader_path {
+                    v.push(format!("--glsl-shaders={p}"));
                 }
             }
+            v.push("--vf=unsharp=5:5:1.0:5:5:0.4".into());
+            v
         }
         _ => Vec::new(),
     }
