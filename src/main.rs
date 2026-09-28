@@ -501,6 +501,12 @@ fn main() {
                     background-color: alpha(currentColor, 0.1);
                 }
 
+                /* === Klavye ile seçilen bölüm satırı (j/k) === */
+                .kb-selected {
+                    background-color: alpha(@accent_color, 0.18);
+                    box-shadow: inset 3px 0 0 @accent_color;
+                }
+
                 /* === Bookmark Butonu (eski floating) === */
                 .lg-icon { -gtk-icon-size: 20px; }
                 .bookmark-btn {

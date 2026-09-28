@@ -345,6 +345,74 @@ pub(crate) fn output_height_for_upscale(w: &impl gtk::prelude::IsA<gtk::Native>)
         .filter(|h: &u32| *h > 0)
 }
 
+/// İndirme aralığı metnini bölüm numaralarına çevirir.
+///
+/// Kabul: "7", "2-15", "2,5,9-12", "tüm"/"all"/"*".
+/// Aralıklar büyükten küçüğe de yazılabilir ("15-2"). Tekrarlananlar
+/// ve sırasız girdiler elenir; sonuç artan sırada döner. Tamamen geçersiz
+/// girdi `None` verir (arayüz bunu hata olarak gösterir).
+fn parse_episode_spec(spec: &str) -> Option<Vec<u64>> {
+    let s = spec.trim().to_lowercase();
+    if s.is_empty() {
+        return None;
+    }
+    if matches!(s.as_str(), "tüm" | "tum" | "all" | "*" | "hepsi") {
+        return None; // "hepsi" ayrı yolla ele alınır; bkz. çağıran.
+    }
+    let mut out: Vec<u64> = Vec::new();
+    for part in s.split(',') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (lo, hi) = match part.split_once('-') {
+            Some((a, b)) => {
+                let (a, b) = (a.trim(), b.trim());
+                // "2-15", "2 - 15" ve "2- 15" hepsi aynı olmalı.
+                let lo = a.parse::<i64>().ok()?;
+                let hi = b.parse::<i64>().ok()?;
+                if lo < 1 || hi < 1 {
+                    return None;
+                }
+                (lo, hi)
+            }
+            None => {
+                let n = part.parse::<i64>().ok()?;
+                if n < 1 {
+                    return None;
+                }
+                (n, n)
+            }
+        };
+        // 15-2 yazılmışsa ters çevir.
+        let (lo, hi) = if lo <= hi { (lo, hi) } else { (hi, lo) };
+        // Kötü niyetli girse belleği patlatmasın diye makul bir tavan.
+        if hi - lo > 5_000 {
+            return None;
+        }
+        for n in lo..=hi {
+            if !out.contains(&(n as u64)) {
+                out.push(n as u64);
+            }
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        out.sort_unstable();
+        Some(out)
+    }
+}
+
+/// Toplu indirmede kullanıcının seçimi.
+enum DownloadRange {
+    /// Bu sezondaki tüm bölümler.
+    All,
+    /// Açıkça yazılan bölüm numaraları (artan sırada, tekrarsız).
+    Nums(Vec<u64>),
+}
+
+
 fn aniskip_input_conf(t: &api::AniSkipTimes) -> String {
     let fmt_sec = |sec: f64| -> String {
         let s = sec as u64;
@@ -4365,6 +4433,76 @@ impl App {
         dialog.present();
     }
 
+    /// Hangi bölümlerin indirileceğini sorar. Varsayılan, seçili sezonun
+    /// tamamıdır; kullanıcı "2-15" gibi bir aralık ya da "tümü" yazabilir.
+    /// `total`, sezondaki bölüm sayısı — aralığın sınırlarını aşması
+    /// durumunda uyarı metni için kullanılır.
+    fn ask_download_range(
+        &self,
+        default: String,
+        total: usize,
+        cb: impl Fn(DownloadRange) + 'static,
+    ) {
+        let dialog = adw::MessageDialog::builder()
+            .heading("Hangi bölümler?")
+            .body(
+                "Tek numara (7), aralık (2-15) veya liste (1,3,8-12) yazabilirsin.\n\
+                 Tüm sezonu almak için \"tümü\" yaz.",
+            )
+            .close_response("cancel")
+            .default_response("ok")
+            .build();
+        dialog.set_transient_for(Some(&self.window));
+        dialog.add_response("cancel", "Vazgeç");
+        dialog.add_response("ok", "Devam");
+        dialog.set_response_appearance("ok", adw::ResponseAppearance::Suggested);
+
+        // MessageDialog gövdeye extra çocuk koymayı `set_extra_child` ile
+        // yapar (bu sürümde `get_message_area` yok).
+        let entry = gtk::Entry::new();
+        entry.set_text(&default);
+        entry.set_placeholder_text(Some("ör. 2-15"));
+        entry.set_hexpand(true);
+        entry.set_activates_default(true);
+        dialog.set_extra_child(Some(&entry));
+
+        let entry_c = entry.clone();
+        let this = self.clone_ref();
+        dialog.connect_response(None, move |_, resp| {
+            if resp != "ok" {
+                return;
+            }
+            let spec = entry_c.text().trim().to_string();
+            let lower = spec.to_lowercase();
+            if matches!(lower.as_str(), "tümü" | "tumu" | "tüm" | "tum" | "hepsi" | "all" | "*") {
+                cb(DownloadRange::All);
+                return;
+            }
+            match parse_episode_spec(&spec) {
+                Some(nums) => {
+                    // Sezonda olmayan bölüm numaralarını sessizce geçme.
+                    let in_range: Vec<u64> = nums
+                        .into_iter()
+                        .filter(|n| *n >= 1 && *n as usize <= total)
+                        .collect();
+                    if in_range.is_empty() {
+                        let t = adw::Toast::new("Bu sezonda o bölümler yok");
+                        t.set_timeout(3);
+                        this.toast.add_toast(t);
+                        return;
+                    }
+                    cb(DownloadRange::Nums(in_range));
+                }
+                None => {
+                    let t = adw::Toast::new("Anlaşılmadı. Örnek: 2-15, 7 veya 1,3,8-12");
+                    t.set_timeout(4);
+                    this.toast.add_toast(t);
+                }
+            }
+        });
+        dialog.present();
+    }
+
     /// Kalite sorusu (tekli: her indirmede; toplu: grup başı bir kez).
     fn ask_download_quality(&self, cb: impl Fn(Option<String>) + 'static) {
         let dir = self.effective_download_dir();
@@ -5076,6 +5214,25 @@ impl App {
         self.cur_eps_title.set(title.id);
         *self.cur_eps.borrow_mut() = eps.to_vec();
 
+        // Sezon seçimi hem indirme butonunun varsayılan aralığı hem de
+        // sekme çubuğu için gerekiyor; ikisi de bu fonksiyonda kuruluyor.
+        let mut seasons: Vec<u64> = eps.iter().map(|e| e.season).collect();
+        seasons.sort_unstable();
+        seasons.dedup();
+        let default_season = self
+            .resume_season(title.id)
+            .filter(|s| seasons.contains(s))
+            .or_else(|| seasons.first().copied())
+            .unwrap_or(1);
+        let sel_season = Rc::new(Cell::new(default_season));
+        // 0 = Tümü, 1 = İzlendi, 2 = İzlenmemiş.
+        let watched_filter = Rc::new(Cell::new(0u8));
+        // Sezon sekmeleri hem buton tıklamasından hem klavye kısayolundan
+        // aynı yolu kullanır; bu yüzden ikisi de fonksiyon başında yaşar.
+        // (Sayfanın "Bölümler/Ekip" sekme çubuğunun `tab_btns`'iyle karışmasın.)
+        let season_btns: Rc<RefCell<Vec<(u64, gtk::ToggleButton)>>> =
+            Rc::new(RefCell::new(Vec::new()));
+
         let is_movie = title.title_type.as_deref() == Some("movie")
             || (eps.len() <= 1 && eps.first().map(|e| e.name.contains("Filmi")).unwrap_or(false));
 
@@ -5172,19 +5329,41 @@ impl App {
         dl_mode_btn.add_css_class("circular");
         dl_mode_btn.add_css_class("lg-icon");
         dl_mode_btn.set_valign(gtk::Align::Center);
-        dl_mode_btn.set_tooltip_text(Some("Tüm bölümleri indir"));
+        dl_mode_btn.set_tooltip_text(Some("Bölüm aralığı indir"));
         {
             let this_dl = self.clone_ref();
             let t_dl = title.clone();
             let eps_dl: Vec<Episode> = eps.to_vec();
+            let sel_dl = sel_season.clone();
             dl_mode_btn.connect_clicked(move |_| {
-                let this2 = this_dl.clone_ref();
-                let t2 = t_dl.clone();
-                let e2 = eps_dl.clone();
-                this_dl.ask_download_quality(move |q| {
-                    if let Some(q) = q {
-                        this2.start_download_prefetch(t2.clone(), e2.clone(), q, false);
+                let sel = sel_dl.get();
+                let in_season: Vec<Episode> =
+                    eps_dl.iter().filter(|e| e.season == sel).cloned().collect();
+                let pool = if in_season.is_empty() { eps_dl.clone() } else { in_season };
+                let lo = pool.iter().map(|e| e.episode).min().unwrap_or(1);
+                let hi = pool.iter().map(|e| e.episode).max().unwrap_or(1);
+                let default = if lo == hi { format!("{lo}") } else { format!("{lo}-{hi}") };
+                // `connect_clicked` Fn alır; Rc'leri callback içinde klonluyoruz.
+                let pool_c = pool.clone();
+                let this_q = this_dl.clone_ref();
+                let t_q = t_dl.clone();
+                this_dl.ask_download_range(default, pool.len(), move |spec| {
+                    let chosen: Vec<Episode> = match spec {
+                        DownloadRange::All => pool_c.clone(),
+                        DownloadRange::Nums(n) => {
+                            pool_c.iter().filter(|e| n.contains(&e.episode)).cloned().collect()
+                        }
+                    };
+                    if chosen.is_empty() {
+                        return;
                     }
+                    let this3 = this_q.clone_ref();
+                    let t3 = t_q.clone();
+                    this_q.ask_download_quality(move |q| {
+                        if let Some(q) = q {
+                            this3.start_download_prefetch(t3.clone(), chosen.clone(), q, false);
+                        }
+                    });
                 });
             });
         }
@@ -5883,18 +6062,6 @@ impl App {
             for (_, row_widget, _) in &*rows_rc {
                 list_box.append(row_widget);
             }
-            // Arama + sekme tek filtreden geçer.
-            let mut seasons: Vec<u64> = eps.iter().map(|e| e.season).collect();
-            seasons.sort_unstable();
-            seasons.dedup();
-            let default_season = self
-                .resume_season(title.id)
-                .filter(|s| seasons.contains(s))
-                .or_else(|| seasons.first().copied())
-                .unwrap_or(1);
-            let sel_season = Rc::new(Cell::new(default_season));
-            // 0 = Tümü, 1 = İzlendi, 2 = İzlenmemiş.
-            let watched_filter = Rc::new(Cell::new(0u8));
             let apply_filter: Rc<dyn Fn()> = {
                 let rows_c = rows_rc.clone();
                 let cards_c = grid_rc.clone();
@@ -5944,6 +6111,26 @@ impl App {
                 let a = apply_filter.clone();
                 ep_search_entry.connect_changed(move |_| a());
             }
+            // Sezon seçimi tek yol: hem sekme butonu hem 1-9 kısayolu
+            // buradan geçer, böylece ikisi asla ayrışmaz.
+            let select_season: Rc<dyn Fn(u64)> = {
+                let sel_c = sel_season.clone();
+                let btns_c = season_btns.clone();
+                let a = apply_filter.clone();
+                Rc::new(move |ss: u64| {
+                    sel_c.set(ss);
+                    for (bs, bb) in btns_c.borrow().iter() {
+                        bb.set_active(*bs == ss);
+                        if *bs == ss {
+                            bb.add_css_class("suggested-action");
+                        } else {
+                            bb.remove_css_class("suggested-action");
+                        }
+                    }
+                    a();
+                })
+            };
+
             if seasons.len() > 1 {
                 let tab_bar = gtk::Box::new(gtk::Orientation::Horizontal, 6);
                 tab_bar.set_margin_start(12);
@@ -5953,40 +6140,170 @@ impl App {
                 season_lbl.add_css_class("dim-label");
                 season_lbl.set_valign(gtk::Align::Center);
                 tab_bar.append(&season_lbl);
-                let tab_btns: Rc<RefCell<Vec<(u64, gtk::ToggleButton)>>> =
-                    Rc::new(RefCell::new(Vec::new()));
-                for s in &seasons {
+                for s in seasons.iter().copied() {
                     // Düz Button yerine ToggleButton: ok tuşlarıyla gezinme
                     // ve "seçili" durumu ekran okuyucuya doğru gider.
                     // linked yok, dolayısıyla görünüm aynı kalıyor.
                     let b = gtk::ToggleButton::with_label(&format!("{s}"));
                     b.add_css_class("pill");
                     b.add_css_class("season-tab");
-                    if *s == default_season {
+                    if s == default_season {
                         b.set_active(true);
                         b.add_css_class("suggested-action");
                     }
-                    let sel_c = sel_season.clone();
-                    let a = apply_filter.clone();
-                    let btns_c = tab_btns.clone();
-                    let ss = *s;
-                    b.connect_clicked(move |_| {
-                        sel_c.set(ss);
-                        for (bs, bb) in btns_c.borrow().iter() {
-                            bb.set_active(*bs == ss);
-                            if *bs == ss {
-                                bb.add_css_class("suggested-action");
-                            } else {
-                                bb.remove_css_class("suggested-action");
-                            }
-                        }
-                        a();
-                    });
-                    tab_btns.borrow_mut().push((*s, b.clone()));
+                    let s2 = select_season.clone();
+                    let ss = s;
+                    b.connect_clicked(move |_| s2(ss));
+                    season_btns.borrow_mut().push((s, b.clone()));
                     tab_bar.append(&b);
                 }
                 episodes_page.append(&tab_bar);
             }
+
+            // Klavye gezinmesi: j/k (ya da ↓/↑) görünür bölümler arasında
+            // ilerler, Enter seçileni oynatır, 1-9 sezon değiştirir.
+            // Satırlar gtk::Box olduğu için odak zinciri yerine indeks tutup
+            // CSS sınıfıyla işaretliyoruz; liste ve ızgara birlikte hareket eder.
+            {
+                let this_k = self.clone_ref();
+                let rows_k = rows_rc.clone();
+                let cards_k = grid_rc.clone();
+                let sel_k = Rc::new(Cell::new(-1i32));
+                let page_name = format!("eps_{}", title.id);
+                let title_k = title.clone();
+                let seasons_k = seasons.clone();
+                let season_k = select_season.clone();
+
+                // Filtrelerden geçen indeksler; gezinme gizli bölümleri atlar.
+                let visible: Rc<dyn Fn() -> Vec<i32>> = {
+                    let rows = rows_rc.clone();
+                    Rc::new(move || {
+                        rows.iter()
+                            .enumerate()
+                            .filter_map(|(i, (_, w, _))| w.is_visible().then_some(i as i32))
+                            .collect()
+                    })
+                };
+
+                // Seçimi liste ve ızgarada birlikte boya.
+                let paint: Rc<dyn Fn(i32)> = {
+                    let rows = rows_rc.clone();
+                    let cards = grid_rc.clone();
+                    Rc::new(move |sel: i32| {
+                        // gtk4-rs 0.8'de set_css_class(yok); ekle/sil çifti.
+                        // gtk4-rs 0.8'de set_css_class yok; ekle/sil çifti.
+                        // Satır kutusu ile ListBox sarmalayıcısı farklı
+                        // tiplerde olduğu için ikisi için ayrı yol.
+                        let mark_box = |w: &gtk::Box, on: bool| {
+                            if on {
+                                w.add_css_class("kb-selected");
+                            } else {
+                                w.remove_css_class("kb-selected");
+                            }
+                        };
+                        let mark_w = |w: &gtk::Widget, on: bool| {
+                            if on {
+                                w.add_css_class("kb-selected");
+                            } else {
+                                w.remove_css_class("kb-selected");
+                            }
+                        };
+                        for (i, (_, w, _)) in rows.iter().enumerate() {
+                            let on = i as i32 == sel;
+                            mark_box(w, on);
+                            if let Some(par) = w.parent() {
+                                mark_w(&par, on);
+                            }
+                        }
+                        for (i, (_, w, _)) in cards.iter().enumerate() {
+                            mark_box(w, i as i32 == sel);
+                        }
+                    })
+                };
+
+                // `delta` kadar görünür satır ilerle; uçlarda dur.
+                let step: Rc<dyn Fn(i32)> = {
+                    let vis = visible.clone();
+                    let sel = sel_k.clone();
+                    let paint = paint.clone();
+                    Rc::new(move |delta: i32| {
+                        let vis = (vis)();
+                        if vis.is_empty() {
+                            return;
+                        }
+                        let cur = sel.get();
+                        let pos = vis
+                            .iter()
+                            .position(|i| *i == cur)
+                            .map(|p| p as i64 + delta as i64)
+                            .unwrap_or(if delta > 0 { 0 } else { vis.len() as i64 - 1 });
+                        let pos = pos.clamp(0, vis.len() as i64 - 1) as usize;
+                        sel.set(vis[pos]);
+                        (paint)(vis[pos]);
+                    })
+                };
+
+                let ctrl = gtk::EventControllerKey::new();
+                ctrl.connect_key_pressed(move |_, key, _, state| {
+                    if state.contains(gtk::gdk::ModifierType::CONTROL_MASK)
+                        || state.contains(gtk::gdk::ModifierType::ALT_MASK)
+                    {
+                        return glib::Propagation::Proceed;
+                    }
+                    // Arama kutusu odaktayken tuşlar yazmaya devam etsin.
+                    if let Some(f) = this_k.window.focus_widget() {
+                        // Arama kutusu odaktayken tuşlar yazmaya devam etsin.
+                        let typing = f.downcast_ref::<gtk::Entry>().is_some()
+                            || f.downcast_ref::<gtk::Text>().is_some()
+                            || f.downcast_ref::<gtk::TextView>().is_some();
+                        if typing {
+                            return glib::Propagation::Proceed;
+                        }
+                    }
+                    // Yalnız bu detay sayfasındayken.
+                    let on_detail = this_k
+                        .stack
+                        .visible_child()
+                        .map(|c| c.widget_name() == page_name)
+                        .unwrap_or(false);
+                    if !on_detail {
+                        return glib::Propagation::Proceed;
+                    }
+
+                    let key_name = key.name().map(|n| n.to_string()).unwrap_or_default();
+                    match key_name.as_str() {
+                        "j" | "Down" => (step)(1),
+                        "k" | "Up" => (step)(-1),
+                        "Home" => (step)(-i32::MAX),
+                        "End" => (step)(i32::MAX),
+                        "Return" | "KP_Enter" => {
+                            let i = sel_k.get();
+                            if i < 0 {
+                                (step)(1);
+                            } else if let Some((ep, _, _)) = rows_k.get(i as usize) {
+                                let ep_c = ep.clone();
+                                this_k.play(&title_k, &ep_c);
+                            }
+                        }
+                        d if d.len() == 1
+                            && d.starts_with(|c: char| c.is_ascii_digit() && c != '0') =>
+                        {
+                            if let Some(n) = d.parse::<u64>().ok() {
+                                if let Some(s) = seasons_k.iter().find(|s| **s == n) {
+                                    (season_k)(*s);
+                                    sel_k.set(-1);
+                                    (step)(1);
+                                }
+                            }
+                        }
+                        _ => return glib::Propagation::Proceed,
+                    }
+                    glib::Propagation::Stop
+                });
+                self.window.add_controller(ctrl);
+            }
+
+
 
             // İzlenme durumuna göre filtre: Tümü / İzlendi / İzlenmemiş.
             let wf_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -7907,5 +8224,34 @@ mod decide_retry_tests {
     fn anime4k_normal_maps_to_bundled_cnn_shader() {
         let p = super::resolve_upscale_shader("Anime4K_Upscale_CNN_x2_M.glsl");
         assert!(p.is_some(), "normal modu için CNN_x2_M shader'ı bundle edilmiş olmalı");
+    }
+
+    #[test]
+    fn episode_spec_tek_aralik_ve_liste() {
+        use super::parse_episode_spec as p;
+        assert_eq!(p("7"), Some(vec![7]));
+        assert_eq!(p("2-15"), Some((2..=15).collect()));
+        assert_eq!(p("15-2"), Some((2..=15).collect()), "ters aralık düzeltilir");
+        assert_eq!(p(" 3 - 6 "), Some(vec![3, 4, 5, 6]), "boşluklu yazım");
+        assert_eq!(p("5,1,3"), Some(vec![1, 3, 5]), "virgüllü liste artan sırada");
+        assert_eq!(p("1,3,8-10"), Some(vec![1, 3, 8, 9, 10]), "karma liste");
+        assert_eq!(p("2,2,3"), Some(vec![2, 3]), "tekrarlar elenir");
+        assert_eq!(p(" 12 "), Some(vec![12]));
+    }
+
+    #[test]
+    fn episode_spec_gecersiz_girdileri_reddeder() {
+        use super::parse_episode_spec as p;
+        assert_eq!(p(""), None, "boş girdi");
+        assert_eq!(p("   "), None, "yalnız boşluk");
+        assert_eq!(p("abc"), None, "harf");
+        assert_eq!(p("0"), None, "sıfır bölüm yok");
+        assert_eq!(p("0-5"), None, "sıfırdan başlayan aralık yok");
+        assert_eq!(p("-3"), None, "negatif");
+        assert_eq!(p("2-"), None, "yarım aralık");
+        assert_eq!(p("1-99999"), None, "aşırı büyük aralık belleği patlatmasın");
+        for w in ["tümü", "tumu", "tüm", "hepsi", "all", "*"] {
+            assert_eq!(p(w), None, "{w} ayrı yolda (DownloadRange::All)");
+        }
     }
 }

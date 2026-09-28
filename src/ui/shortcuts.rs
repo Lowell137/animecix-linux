@@ -48,12 +48,18 @@ fn ui_xml(search: &str, quick_search: &str, quick_enabled: bool) -> String {
             item("Escape", "Arama penceresini kapat"),
         ],
     )];
+    // Arama kutusu ayarla kapalıysa yalnız o satır gizlenir; bölüm
+    // gezinme kısayolları her zaman geçerli.
+    let mut eps_items = vec![
+        item("j / ↓", "Sonraki bölüm"),
+        item("k / ↑", "Önceki bölüm"),
+        item("Return", "Seçili bölümü oynat"),
+        item("1 – 9", "Sezon değiştir"),
+    ];
     if quick_enabled {
-        groups.push(group(
-            "Bölüm Sayfası",
-            vec![item(&accel(quick_search), "Bölüm listesinde ara")],
-        ));
+        eps_items.insert(0, item(&accel(quick_search), "Bölüm listesinde ara"));
     }
+    groups.push(group("Bölüm Sayfası", eps_items));
     groups.push(group(
         "Oynatıcı",
         vec![
@@ -148,14 +154,20 @@ mod tests {
     }
 
     #[test]
-    fn xml_includes_settings_and_drops_quick_group() {
+    fn xml_includes_settings_and_gates_only_the_search_row() {
         let with = ui_xml("F2", "Ctrl+F", true);
         assert!(with.contains(r#"<property name="accelerator">&lt;ctrl&gt;f</property>"#));
         assert!(with.contains("Aramayı aç"));
         assert!(with.contains("İntroyu atla"));
         assert!(with.contains("Bölüm Sayfası"));
+        assert!(with.contains("Bölüm listesinde ara"));
+
+        // Arama kapalıyken yalnız arama satırı gider; bölüm gezinme
+        // kısayolları (j/k, Return, 1-9) çalışmaya devam eder.
         let without = ui_xml("Ctrl+S", "/", false);
-        assert!(!without.contains("Bölüm Sayfası"));
+        assert!(!without.contains("Bölüm listesinde ara"), "arama satırı gizlenmeli");
+        assert!(without.contains("Sonraki bölüm"), "gezinme her zaman görünmeli");
+        assert!(without.contains("Sezon değiştir"));
         assert!(without.contains(r#"<property name="accelerator">&lt;ctrl&gt;s</property>"#));
     }
 
