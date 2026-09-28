@@ -2609,6 +2609,9 @@ impl App {
         name.set_justify(gtk::Justification::Center);
         name.set_xalign(0.5);
         name.set_max_width_chars(16);
+        // Kart 140px; etiket doğal genişliği aşarsa `column_homogeneous`
+        // sütunları genişletip araya boşluk bırakıyor. Sabitle.
+        name.set_size_request(138, -1);
         name.set_lines(1);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
         card.append(&name);
@@ -2634,6 +2637,7 @@ impl App {
         meta.set_single_line_mode(true);
         meta.set_ellipsize(gtk::pango::EllipsizeMode::End);
         meta.set_max_width_chars(18);
+        meta.set_size_request(138, -1);
         card.append(&meta);
         // Hover'da sadece play butonunu göster/gizle, posteri hafif kaldır.
         {
