@@ -2580,7 +2580,7 @@ impl App {
             b.set_halign(gtk::Align::Start);
             b.set_valign(gtk::Align::Start);
             b.set_margin_top(6);
-            b.set_margin_start(6);
+            b.set_margin_start(12);
             b.set_visible(true); // her zaman görünür
             b.set_tooltip_text(Some(if member {
                 "Maratonda (çıkarmak için tıkla)"
@@ -3013,7 +3013,13 @@ impl App {
         grid.set_column_homogeneous(true);
         grid.set_row_spacing(18);
         grid.set_halign(if center { gtk::Align::Center } else { gtk::Align::Start });
-        grid.set_hexpand(true);
+        // Dikkat: `column_homogeneous` + `hexpand` birlikte olursa GTK boş
+        // alanı SÜTUNLARA dağıtıyor; 140px'lik kartlar ~188px'e gerilip
+        // aralarında 60px boşluk kalıyordu. Ortalanmış ızgarada genişletme
+        // yapmıyoruz, kartlar kendi doğal genişliğinde kalıyor.
+        if !center {
+            grid.set_hexpand(true);
+        }
         for (i, card) in cards.into_iter().enumerate() {
             grid.attach(&card, (i as u32 % cols) as i32, (i as u32 / cols) as i32, 1, 1);
         }
@@ -3159,6 +3165,13 @@ impl App {
         }
         self.paint_mode_button();
 
+        let target = if next { Page::MangaHome } else { Page::Home };
+        {
+            let mut st = self.page_history.borrow_mut();
+            if st.last() != Some(&target) {
+                st.push(target.clone());
+            }
+        }
         if next {
             // Ana içerik önce gelsin; geçmiş ikinci dalgada. Mod geçişi
             // bu yüzden beklemiyor.
@@ -3171,12 +3184,12 @@ impl App {
                     this_hist.fetch_manga_history();
                 }
             });
-            self.show_page(&Page::MangaHome);
+            self.show_page(&target);
         } else {
             if self.cats.borrow().is_empty() {
                 self.fetch_home();
             }
-            self.show_page(&Page::Home);
+            self.show_page(&target);
         }
     }
 
@@ -3208,6 +3221,13 @@ impl App {
     }
 
     pub fn open_manga_detail(&self, title: Title) {
+        // Geçmişe ekle; geri tuşu detaydan ana sayfaya dönsün.
+        {
+            let mut st = self.page_history.borrow_mut();
+            if st.last() != Some(&Page::MangaDetail { title: title.clone() }) {
+                st.push(Page::MangaDetail { title: title.clone() });
+            }
+        }
         self.busy(true);
         let tid = title.id;
         let fallback = title.clone();
@@ -3234,8 +3254,17 @@ impl App {
     }
 
     /// Okuyucuyu belirli bölüm/sayfada açar.
+    ///
+    /// Geçmişe EKLENİYOR: eklenmediğinde geri tuşu manga sayfalarını
+    /// atlayıpanime ana sayfasına düşüyordu.
     pub fn open_manga_reader(&self, chapter: usize, page: usize) {
-        self.show_page(&Page::MangaReader { chapter, page });
+        let page = Page::MangaReader { chapter, page };
+        let mut st = self.page_history.borrow_mut();
+        if st.last() != Some(&page) {
+            st.push(page.clone());
+        }
+        drop(st);
+        self.show_page(&page);
     }
 
     /// Manga keşfi: tür çipleri + sayfalı kart ızgarası.
