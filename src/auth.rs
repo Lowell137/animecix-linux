@@ -443,6 +443,9 @@ impl Client {
         let mut entries: Vec<crate::api::ServerEntry> = items
             .iter()
             .filter_map(|r| {
+                // NOT: buradaki filtre anime/movie'yi eler. Manga modu aynı
+                // isteği kullanıyor ama ELENMİŞ veriyle çalışmak zorunda,
+                // o yüzden `manga_history` aşağıdaki ham sürümü kullanır.
                 let title = crate::api::Title::from_value(r)?;
                 let date = r["date"].as_u64().unwrap_or(0);
                 let v0 = r["videos"].as_array().and_then(|a| a.first());
@@ -454,6 +457,97 @@ impl Client {
         // API zaten tarih-azalan dönüyor; garantiye al.
         entries.sort_by(|a, b| b.date.cmp(&a.date));
         Ok((entries, total))
+    }
+
+    /// Geçmiş uçunun HAM hali (hiçbir tür filtresi uygulanmaz).
+    /// Manga modu bunu kullanıyor: `fetch_history_page` anime/movie dışını
+    /// attığı için manga kayıtları oradan dönemez.
+    fn fetch_history_raw(
+        http: &crate::http::Http,
+        cookie: &str,
+        xsrf: &str,
+        page: u32,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        let resp = http
+            .get(format!("{BASE}/secure/history/get-titles?page={page}"))
+            .header("Cookie", cookie)
+            .header("X-XSRF-TOKEN", xsrf)
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Accept", "application/json")
+            .timeout(20)
+            .send()?;
+        let v: serde_json::Value = resp.json()?;
+        Ok(v["data"]["totalData"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Manga modunda "kaldığın yer" — KENDİ sitesinden.
+    ///
+    /// mangacix.net kendi geçmiş uçnunu oturum çereziyle cevaplıyor ve
+    /// yalnız manga/manhwa/manhua/novel dönüyor (ölçüldü: 6 kayıt, hepsi
+    /// manga türünde, kapakları dolu). animecix.tv'nin geçmişi iki türü
+    /// karışık döndürüyor ve manga için boş iskelet kayıt veriyor, o yüzden
+    /// burada kullanılmıyor.
+    pub fn manga_history(&self, limit: usize) -> Result<Vec<crate::api::MangaHistory>, String> {
+        if !self.is_logged_in() {
+            return Ok(Vec::new());
+        }
+        const MANGA: [&str; 4] = ["manga", "manhwa", "manhua", "novel"];
+        let (cookie, xsrf, http) = {
+            let s = self.session.lock().map_err(|e| e.to_string())?;
+            (
+                s.cookie_header(),
+                s.xsrf().unwrap_or_default(),
+                self.http.clone(),
+            )
+        };
+        let mut out = Vec::new();
+        for page in 0..3 {
+            let sig = crate::xeh::sign_query("").map_err(|e| e.to_string())?;
+            let resp = http
+                .get(format!(
+                    "{}/secure/history/get-titles?page={page}",
+                    crate::api::MANGA_BASE
+                ))
+                .header("Cookie", &cookie)
+                .header("X-XSRF-TOKEN", &xsrf)
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("Accept", "application/json")
+                .header("Referer", "https://mangacix.net/")
+                .header("X-E-H", &sig)
+                .timeout(20)
+                .send()
+                .map_err(|e| e.to_string())?;
+            let v: serde_json::Value = resp.json().map_err(|e| e.to_string())?;
+            let Some(arr) = v["data"]["totalData"].as_array() else { break };
+            for r in arr {
+                if !MANGA.contains(&r["title_type"].as_str().unwrap_or("")) {
+                    continue;
+                }
+                let Some(title) = crate::api::Title::from_value(r) else { continue };
+                let episode = r["videos"]
+                    .as_array()
+                    .and_then(|a| a.first())
+                    .and_then(|v| v["episode_num"].as_u64())
+                    .unwrap_or(0);
+                out.push(crate::api::MangaHistory {
+                    name: title.name.clone(),
+                    poster: title.poster.clone(),
+                    chapter_label: if episode > 0 {
+                        format!("{episode}. Bölüm")
+                    } else {
+                        String::new()
+                    },
+                    title,
+                });
+                if out.len() >= limit {
+                    return Ok(out);
+                }
+            }
+        }
+        Ok(out)
     }
 
     /// Devam listesi için en yeni sayfalar (tarih-azalan birleşik).

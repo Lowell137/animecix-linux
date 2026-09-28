@@ -5,6 +5,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const BASE: &str = "https://animecix.tv";
+/// Manga modundaki "kaldığın yer": sunucu geçmişindeki bir manga kaydı.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MangaHistory {
+    #[serde(default)]
+    pub title: Title,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub poster: Option<String>,
+    /// Okunan son bölüm etiketi ("12. Bölüm" gibi).
+    #[serde(default)]
+    pub chapter_label: String,
+}
+
 /// Manga modunun taban adresi. AnimeciX ile aynı hesabı ve aynı API
 /// yüzeyini kullanıyor, yalnız taban adresi farklı.
 pub(crate) const MANGA_BASE: &str = "https://mangacix.net";
@@ -1286,9 +1300,16 @@ impl Client {
         })?;
         let total = d["total"].as_u64().unwrap_or(0) as usize;
         let last = d["last_page"].as_u64().unwrap_or(1).max(1) as u32;
+        // Son bölümler ucu iki türü karışık döndürüyor (Solo Leveling gibi
+        // anime'ler de geliyor). Manga modunda yalnız manga türleri tutulur;
+        // türü boş olan atlanır çünkü hangisi olduğu belli değil.
+        const MANGA: [&str; 4] = ["manga", "manhwa", "manhua", "novel"];
         let mut out = Vec::new();
         if let Some(arr) = d["data"].as_array() {
             for e in arr {
+                if !MANGA.contains(&e["title_type"].as_str().unwrap_or("")) {
+                    continue;
+                }
                 out.push(LastEpisode {
                     title_id: Self::u64_field(e, "title_id"),
                     title_name: Self::str_field(e, "title_name"),
@@ -1308,9 +1329,11 @@ impl Client {
 
     /// Manga keşfi: `/secure/titles` + X-E-H imzası (MangaCiX ile aynı).
     /// `tür` boşsa tüm manga/manhwa/manhua/novel gelir.
+    /// `sırala`: "desc" (yeni eklenen), "asc" (eskiden yeniye), "name" (A-Z).
     pub fn manga_discover(
         &self,
         tür: &str,
+        sırala: &str,
         page: u32,
     ) -> Result<(Vec<Title>, usize, u32), String> {
         let page = page.max(1);
@@ -1326,7 +1349,7 @@ impl Client {
         if !tür.is_empty() {
             push("type", tür);
         }
-        push("order", "desc");
+        push("order", sırala);
         push("page", &page.to_string());
         push("perPage", "24");
         let key = format!("manga_disc:{q}");
@@ -1396,10 +1419,14 @@ impl Client {
         Ok(t)
     }
 
-    pub fn search(&self, q: &str) -> Result<Vec<Title>, String> {
-        let key = format!("search:{q}");
+    pub fn search(&self, q: &str, manga: bool) -> Result<Vec<Title>, String> {
+        // Manga modunda arama mangacix.net'e gider; aynı uç yolu, farklı
+        // taban adresi ve manga tür filtresi yok (sunucu kendi türünde döner).
+        let base = if manga { MANGA_BASE } else { BASE };
+        let key = format!("{}:search:{q}", if manga { "manga" } else { "anime" });
+        let url = format!("{base}/secure/search/{}", q);
         let d = self.cache_get(&key, 300, |http| {
-            http.get(format!("{BASE}/secure/search/{}", q))
+            http.get(&url)
                 .header("Accept", "application/json")
                 .query(&[("limit", "20")])
                 .send()
@@ -1412,7 +1439,17 @@ impl Client {
         let mut out = Vec::new();
         if let Some(results) = d["results"].as_array() {
             for r in results {
-                if let Some(t) = Title::from_value(r) {
+                // Manga modunda tür filtresi yok; anime modunda anime filtresi
+                // var ama sunucu anime dışını karışık dönebiliyor.
+                let t = if manga {
+                    Title::from_value_lenient(r)
+                } else {
+                    Title::from_value(r)
+                };
+                if let Some(mut t) = t {
+                    if manga && t.title_type.is_none() {
+                        t.title_type = Some("manga".into());
+                    }
                     out.push(t);
                 }
             }
@@ -1433,13 +1470,13 @@ impl Client {
                 }
             }
         }
-        if let Ok(results) = self.search(&t.id.to_string()) {
+        if let Ok(results) = self.search(&t.id.to_string(), false) {
             if let Some(src) = results.into_iter().find(|x| x.id == t.id) {
                 return src;
             }
         }
         if !t.name.is_empty() {
-            if let Ok(results) = self.search(&t.name) {
+            if let Ok(results) = self.search(&t.name, false) {
                 if let Some(src) = results.into_iter().find(|x| x.id == t.id) {
                     return src;
                 }
@@ -3112,7 +3149,7 @@ impl Client {
             return changed;
         }
         if t.name.is_empty() {
-            if let Ok(results) = self.search(&t.id.to_string()) {
+            if let Ok(results) = self.search(&t.id.to_string(), false) {
                 if let Some(src) = results.into_iter().find(|x| x.id == t.id) {
                     t.name = src.name;
                     if t.poster.is_none() {
@@ -4391,7 +4428,7 @@ mod live_tests {
     #[ignore]
     fn search_live() {
         let c = Client::new();
-        let r = c.search("one piece").expect("search basarisiz");
+        let r = c.search("one piece", false).expect("search basarisiz");
         println!("sonuc: {}", r.len());
         assert!(!r.is_empty());
     }

@@ -507,43 +507,50 @@ fn main() {
                     box-shadow: inset 3px 0 0 @accent_color;
                 }
 
-                /* === Mod Geçişi (Başlık çubuğu ortası, AdwViewSwitcher düzeni) ===
-                   İkili birleşik hap: yarı saydam kapsayıcı + ince kenarlık,
-                   8px köşe, butonlar arasında boşluk yok. Aktif olan açık
-                   gri + kalın yazıyla öne çıkar. */
-                .mode-switch {
-                    background-color: rgba(255, 255, 255, 0.06);
-                    border: 1px solid rgba(255, 255, 255, 0.08);
-                    border-radius: 8px;
-                    padding: 3px;
-                }
-                .mode-switch > button {
-                    min-height: 32px;
-                    min-width: 76px;
-                    padding: 0 16px;
-                    border-radius: 6px;
+                /* === Başlık Menüsü (GNOME HIG) ===
+                   Ortadaki .flat MenuButton: "AnimeciX ▾". Popover'da iki
+                   mod satırı, aktif olanın sağında onay işareti. */
+                .title-menu {
                     background-color: transparent;
                     background-image: none;
                     border: none;
                     box-shadow: none;
+                    border-radius: 6px;
+                    padding: 6px 12px;
+                    color: #ffffff;
+                    font-size: 14px;
+                    font-weight: 700;
+                }
+                .title-menu:hover,
+                .title-menu[active] {
+                    background-color: rgba(255, 255, 255, 0.08);
+                }
+                .title-menu-label { color: #ffffff; }
+                .title-menu-chevron {
+                    -gtk-icon-size: 12px;
+                    opacity: 0.6;
                     color: #9a9996;
+                }
+
+                /* Popover listesi */
+                .title-menu-list { padding: 6px; }
+                .title-menu-item {
+                    background-color: transparent;
+                    background-image: none;
+                    border: none;
+                    box-shadow: none;
+                    border-radius: 8px;
+                    padding: 8px 10px;
+                    color: #deddda;
                     font-size: 13px;
-                    font-weight: 500;
-                    transition: background-color 120ms ease, color 120ms ease;
                 }
-                .mode-switch > button:hover {
-                    background-color: rgba(255, 255, 255, 0.05);
-                    color: #ffffff;
+                .title-menu-item:hover {
+                    background-color: rgba(255, 255, 255, 0.08);
                 }
-                .mode-switch > button:checked {
-                    background-color: rgba(255, 255, 255, 0.18);
-                    color: #ffffff;
-                    font-weight: 600;
-                    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
-                }
-                /* Seçili buton hover'da da seçili görünmeli. */
-                .mode-switch > button:checked:hover {
-                    background-color: rgba(255, 255, 255, 0.22);
+                .title-menu-item-active { color: #ffffff; font-weight: 600; }
+                .title-menu-check {
+                    -gtk-icon-size: 16px;
+                    color: @accent_color;
                 }
 
                 /* === Bookmark Butonu (eski floating) === */
