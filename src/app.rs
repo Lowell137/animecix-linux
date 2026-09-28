@@ -818,12 +818,10 @@ impl App {
             .build();
         window.set_size_request(1479, 845);
 
-        // Kayıtlı manga modunda doğrudan manga ana sayfasından başla.
-        let initial_page = if client.load_settings().manga_mode {
-            Page::MangaHome
-        } else {
-            Page::Home
-        };
+        // Uygulama daima anime modunda açılır. Mod ayarlarda saklanıyor
+        // ama açılışta uygulanmıyor: kaldığı yerden devam eden kullanıcı
+        // her seferinde MangaCiX'e düşüyordu.
+        let initial_page = Page::Home;
 
         let covers = CoverManager::new(client.clone());
 
@@ -1001,17 +999,9 @@ impl App {
         app_inst.dl_manager.set_connections(app_inst.settings.borrow().download_connections);
         app_inst.apply_ui_scale();
         app_inst.apply_sidebar();
-        // Kayıtlı modu geri yükle: düğmeyi boya ve doğru sayfadan başla.
-        // Manga modundaysak anime listelerini hiç çekmiyoruz.
-        {
-            let saved_manga = app_inst.settings.borrow().manga_mode;
-            if saved_manga {
-                app_inst.manga_mode.set(true);
-                app_inst.fetch_manga_home();
-                app_inst.fetch_manga_history();
-            }
-            app_inst.paint_mode_button();
-        }
+        // Açılış her zaman anime modunda; düğmeyi buna göre boya.
+        app_inst.manga_mode.set(false);
+        app_inst.paint_mode_button();
         // Açılışta girişliyse sunucu favorilerini sessizce birleştir.
         {
             let c = app_inst.client.clone();
@@ -3537,21 +3527,69 @@ impl App {
 
     /// Manga okuyucusu: tek sayfa, sağdan sola. Üstte bölüm/sayfa sayacı,
     /// altta önceki/sonraki. Boşluk/sağ ok sayfayı ilerletir, ← geri.
+    /// Okuma hedefi: bir dilimin ekrandaki yüksekliği.
+    ///
+    /// Manga sayfaları çoğu zaman webtoon "uzun şerit": 700x13230 gibi tek
+    /// parça. Tamamı tek doku olsaydı 37 MB yer, pencereye sığdırılınca da
+    /// okunmaz olurdu (ekran görüntüsündeki bozuk manhwa buydu). Şeritleri
+    /// bu yükseklikteki dilimlere bölüyoruz; her dilim bir "sayfa" gibi
+    /// ilerliyor.
+    const READ_SLICE_H: i32 = 1500;
+    const READ_W: i32 = 900;
+
+    /// Bölümün okuma dilimlerini listeler:
+    /// (url, dilimin sayfa içindeki piksel ofseti, toplam dilim, dilim yüksekliği)
+    fn manga_slice_plan(
+        pages: &[api::MangaPage],
+        chapter: &api::MangaChapter,
+    ) -> Vec<(String, i32, usize, i32)> {
+        let mut out = Vec::new();
+        for p in api::Client::manga_pages_of(pages, chapter) {
+            if p.width == 0 || p.height == 0 {
+                continue;
+            }
+            let (n, dh) = CoverManager::manga_slice_count(
+                p.width,
+                p.height,
+                Self::READ_W,
+                Self::READ_SLICE_H,
+            );
+            for k in 0..n {
+                let h = Self::READ_SLICE_H.min(dh - (k as i32) * Self::READ_SLICE_H);
+                out.push((
+                    p.url.clone(),
+                    k as i32 * Self::READ_SLICE_H,
+                    n,
+                    h.max(1),
+                ));
+            }
+        }
+        out
+    }
+
+    /// Okuyucu: tek dilim, üstte bölüm + sayacı, altta bölüm gezinme.
+    /// Sağ yarı / → / Boşluk ileri, sol yarı / ← geri. Sonraki 3 dilim önden
+    /// yüklenir. Otomatik geçiş açıksa ayarlı saniye sonra ilerler.
     fn build_manga_reader_view(&self, chapter: usize, page: usize) -> gtk::Box {
         let chapters = self.manga_chapters.borrow().clone();
         let pages = self.manga_pages.borrow().clone();
-        let Some(ch) = chapters.get(chapter).cloned() else {
-            return gtk::Box::new(gtk::Orientation::Vertical, 0);
-        };
-        let ch_pages = api::Client::manga_pages_of(&pages, &ch);
-        let total = ch_pages.len();
-        let idx = page.min(total.saturating_sub(1));
-
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
         root.set_hexpand(true);
         root.set_vexpand(true);
-        root.append(&self.build_manga_reader_bar(chapter, idx, total, &ch));
 
+        let Some(ch) = chapters.get(chapter).cloned() else {
+            let l = gtk::Label::new(Some("Bölüm bulunamadı."));
+            l.add_css_class("dim-label");
+            l.set_vexpand(true);
+            l.set_valign(gtk::Align::Center);
+            root.append(&l);
+            return root;
+        };
+        let plan = Self::manga_slice_plan(&pages, &ch);
+        let total = plan.len();
+        let idx = page.min(total.saturating_sub(1));
+
+        root.append(&self.build_manga_reader_bar(chapter, idx, total, &ch));
         if total == 0 {
             let lbl = gtk::Label::new(Some("Bu bölümde sayfa yok."));
             lbl.add_css_class("dim-label");
@@ -3561,51 +3599,59 @@ impl App {
             return root;
         }
 
-        // Sayfa görseli. Manga dikey ve sağdan sola okunur; ilk sayfa sağda.
         let area = gtk::ScrolledWindow::new();
         area.set_hexpand(true);
         area.set_vexpand(true);
+        area.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
         let holder = gtk::Box::new(gtk::Orientation::Vertical, 0);
         area.set_child(Some(&holder));
-        if let Some(p) = ch_pages.get(idx) {
-            // Okunabilir en fazla 1400px; kaynak daha büyükse bellek için küçültülür.
-            holder.append(&self.covers.manga_page_picture(&p.url, p.width, p.height, 1400));
+
+        if let Some((url, y, _, h)) = plan.get(idx) {
+            let pic = gtk::Picture::new();
+            pic.set_content_fit(gtk::ContentFit::Contain);
+            pic.set_halign(gtk::Align::Center);
+            pic.set_size_request(-1, *h);
+            self.load_manga_slice(url, *y, *h, &pic);
+            holder.append(&pic);
         }
 
-        // Tıklama: sağ yarı = ileri, sol yarı = geri (okuma yönü).
+        // Sonraki dilimleri önden yükle: okurken beklemiyor.
+        for (url, y, _, h) in plan.iter().skip(idx + 1).take(3) {
+            self.prefetch_manga_slice(url, *y, *h);
+        }
+
         let tap = gtk::GestureClick::new();
-        let this_r = self.clone_ref();
-        let this_l = self.clone_ref();
-        tap.connect_released(move |g, _, x, _| {
-            let w = g.widget().width() as f64;
-            if x > w / 2.0 {
-                this_r.manga_reader_step(chapter, idx as i32, 1, total);
-            } else {
-                this_l.manga_reader_step(chapter, idx as i32, -1, total);
-            }
-        });
+        {
+            let r = self.clone_ref();
+            let l = self.clone_ref();
+            tap.connect_released(move |g, _, x, _| {
+                let w = g.widget().width() as f64;
+                if x > w / 2.0 {
+                    r.manga_reader_step(chapter, idx as i32, 1, total);
+                } else {
+                    l.manga_reader_step(chapter, idx as i32, -1, total);
+                }
+            });
+        }
         area.add_controller(tap);
 
-        // Klavye: Boşluk/→ ileri, ← geri, PageUp/PageDown bölüm.
         let keys = gtk::EventControllerKey::new();
         {
-            let this_k = self.clone_ref();
+            let k = self.clone_ref();
             keys.connect_key_pressed(move |_, key, _, _| {
-                let on_reader = this_k
+                if !k
                     .stack
                     .visible_child_name()
-                    .is_some_and(|n| n == "manga_reader");
-                if !on_reader {
+                    .is_some_and(|n| n == "manga_reader")
+                {
                     return glib::Propagation::Proceed;
                 }
                 let kn = key.name().map(|n| n.to_string()).unwrap_or_default();
                 match kn.as_str() {
                     "Right" | "space" | "Page_Down" => {
-                        this_k.manga_reader_step(chapter, idx as i32, 1, total)
+                        k.manga_reader_step(chapter, idx as i32, 1, total)
                     }
-                    "Left" | "Page_Up" => {
-                        this_k.manga_reader_step(chapter, idx as i32, -1, total)
-                    }
+                    "Left" | "Page_Up" => k.manga_reader_step(chapter, idx as i32, -1, total),
                     _ => return glib::Propagation::Proceed,
                 }
                 glib::Propagation::Stop
@@ -3613,28 +3659,112 @@ impl App {
         }
         area.add_controller(keys);
         root.append(&area);
-        root.append(&self.build_manga_reader_nav(chapter, idx, total, &ch));
+
+        let auto_secs = self.manga_auto_secs();
+        if auto_secs > 0 {
+            let this = self.clone_ref();
+            glib::timeout_add_local_once(std::time::Duration::from_secs(auto_secs), move || {
+                this.manga_reader_step(chapter, idx as i32, 1, total);
+            });
+        }
+        root.append(&self.build_manga_reader_nav(chapter));
         root
     }
 
-    /// Okuyucuda sayfa/bölüm değiştirir. Sonun ötesine taşarsa komşu bölüme.
+    /// Otomatik sayfa geçişi saniyesi; 0 = kapalı.
+    fn manga_auto_secs(&self) -> u64 {
+        self.settings.borrow().manga_auto_advance_secs.min(300)
+    }
+
+    /// Bir dilimin dokusunu üretip widget'a koyar.
+    ///
+    /// Doku `Texture` Send ama Sync DE�İL; bu yüzden paylaşılan bir
+    /// önbelleğe koyamıyoruz. Mevcut kapak hattının deseni: worker dokuyu
+    /// kanaldan gönderir, ana thread alıp hem önbelleğe yazar hem widget'a
+    /// basar. (Uygulamanın Rc'si thread'e taşınamadığı için kanal şart.)
+    fn load_manga_slice(&self, url: &str, y_off: i32, h: i32, pic: &gtk::Picture) {
+        let url = url.to_string();
+        let key = format!("{url}#s{y_off}x{h}");
+        if let Some(Some(t)) = self.covers.slice_cache_get(&key) {
+            pic.set_paintable(Some(&t));
+            return;
+        }
+        let client = self.client.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<gtk::gdk::Texture>();
+        let w = Self::READ_W;
+        std::thread::spawn(move || {
+            if let Some(bytes) = client.get_bytes(&url) {
+                if let Some(t) = CoverManager::manga_slice_texture(&bytes, w, y_off, h) {
+                    let _ = tx.send(t);
+                }
+            }
+        });
+        let this = self.clone_ref();
+        let k = key.clone();
+        let pic_c = pic.clone();
+        glib::idle_add_local(move || match rx.try_recv() {
+            Ok(t) => {
+                this.covers.slice_cache_put(&k, t.clone());
+                pic_c.set_paintable(Some(&t));
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        });
+    }
+
+    /// Sonraki dilimi sessizce indirip dokuyu önbelleğe alır (okuma
+    /// sırasında beklemesin diye 3 dilim ileri önden hazırlanır).
+    fn prefetch_manga_slice(&self, url: &str, y_off: i32, h: i32) {
+        let url = url.to_string();
+        let key = format!("{url}#s{y_off}x{h}");
+        if self.covers.slice_cache_get(&key).is_some() {
+            return;
+        }
+        let client = self.client.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<gtk::gdk::Texture>();
+        let w = Self::READ_W;
+        std::thread::spawn(move || {
+            if let Some(bytes) = client.get_bytes(&url) {
+                if let Some(t) = CoverManager::manga_slice_texture(&bytes, w, y_off, h) {
+                    let _ = tx.send(t);
+                }
+            }
+        });
+        let this = self.clone_ref();
+        let k = key.clone();
+        glib::idle_add_local(move || match rx.try_recv() {
+            Ok(t) => {
+                this.covers.slice_cache_put(&k, t);
+                glib::ControlFlow::Break
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
+        });
+    }
+
+    /// Dilim ilerletir; sonun ötesinde komşu bölüme geçer.
     fn manga_reader_step(&self, chapter: usize, page: i32, delta: i32, total: usize) {
-        let chapters = self.manga_chapters.borrow();
         let new_page = page + delta;
         if new_page >= 0 && (new_page as usize) < total {
-            drop(chapters);
             self.open_manga_reader(chapter, new_page as usize);
             return;
         }
-        // Bölüm sınırı: sonraki/önceki bölümün başına.
-        if delta > 0 {
+        let chapters = self.manga_chapters.borrow();
+        let target = if delta > 0 {
             if chapter + 1 < chapters.len() {
-                drop(chapters);
-                self.open_manga_reader(chapter + 1, 0);
+                Some(chapter + 1)
+            } else {
+                None
             }
         } else if chapter > 0 {
-            drop(chapters);
-            self.open_manga_reader(chapter - 1, 0);
+            Some(chapter - 1)
+        } else {
+            None
+        };
+        drop(chapters);
+        if let Some(c) = target {
+            self.open_manga_reader(c, 0);
         }
     }
 
@@ -3650,57 +3780,46 @@ impl App {
         bar.set_margin_bottom(6);
         bar.set_margin_start(12);
         bar.set_margin_end(12);
-        let name = gtk::Label::new(Some(&format!(
-            "Bölüm {:.2} · {}",
-            ch.number, ch.name
-        )));
+        let name = gtk::Label::new(Some(&format!("Bölüm {:.2} · {}", ch.number, ch.name)));
         name.set_xalign(0.0);
         name.set_ellipsize(gtk::pango::EllipsizeMode::End);
         name.set_hexpand(true);
         name.add_css_class("title-4");
         bar.append(&name);
-        let counter = gtk::Label::new(Some(&format!("{}/{}", page + 1, total)));
-        counter.add_css_class("dim-label");
-        bar.append(&counter);
+        bar.append(&gtk::Label::new(Some(&format!("{}/{}", page + 1, total))));
         bar
     }
 
-    fn build_manga_reader_nav(
-        &self,
-        chapter: usize,
-        page: usize,
-        total: usize,
-        ch: &api::MangaChapter,
-    ) -> gtk::Box {
+    fn build_manga_reader_nav(&self, chapter: usize) -> gtk::Box {
         let nav = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         nav.set_halign(gtk::Align::Center);
         nav.set_margin_top(8);
         nav.set_margin_bottom(12);
-        let chapters = self.manga_chapters.borrow();
-
-        let has_prev_ch = chapter > 0;
-        let has_next_ch = chapter + 1 < chapters.len();
+        let (has_prev, has_next) = {
+            let chapters = self.manga_chapters.borrow();
+            (chapter > 0, chapter + 1 < chapters.len())
+        };
         let mut prev = gtk::Button::with_label("‹ Önceki bölüm");
         prev.add_css_class("pill");
-        prev.set_sensitive(has_prev_ch);
-        if has_prev_ch {
+        prev.set_sensitive(has_prev);
+        if has_prev {
             let this = self.clone_ref();
-            let c0 = chapter.saturating_sub(1);
+            let c0 = chapter - 1;
             prev.connect_clicked(move |_| this.open_manga_reader(c0, 0));
         }
         let mut next = gtk::Button::with_label("Sonraki bölüm ›");
         next.add_css_class("pill");
-        next.set_sensitive(has_next_ch);
-        if has_next_ch {
+        next.set_sensitive(has_next);
+        if has_next {
             let this = self.clone_ref();
             let c1 = chapter + 1;
             next.connect_clicked(move |_| this.open_manga_reader(c1, 0));
         }
         nav.append(&prev);
-        let _ = (page, total, ch);
         nav.append(&next);
         nav
     }
+
 
 
     /// Manga ana sayfası. Okuyucu henüz taşınmadı; liste gerçek veriden
@@ -7599,7 +7718,14 @@ impl App {
             Msg::Cats(res) => match res {
                 Ok(cats) => {
                     *self.cats.borrow_mut() = cats;
-                    if self.page_history.borrow().last() == Some(&Page::Home) {
+                    // Geçmişe bakma: mod düğmesi show_page çağırıyor ama
+                    // history'ye eklemiyor, kontrol hep yanlış dönüyordu ve
+                    // sayfa "yükleniyor"de kalıyordu. Görünür yığın adına bak.
+                    if self
+                        .stack
+                        .visible_child_name()
+                        .is_some_and(|n| n == "home")
+                    {
                         self.show_page(&Page::Home);
                     }
                 }

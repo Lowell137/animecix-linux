@@ -726,6 +726,9 @@ pub struct Settings {
     /// kaldığı modda başlar.
     #[serde(default)]
     pub manga_mode: bool,
+    /// Okuyucuda otomatik sayfa geçişi, saniye. 0 = kapalı.
+    #[serde(default)]
+    pub manga_auto_advance_secs: u64,
     #[serde(default = "default_patience")]
     pub source_patience_secs: u64,
     #[serde(default)]
@@ -859,6 +862,7 @@ impl Default for Settings {
             upscale: default_upscale(),
             light_mode: false,
             manga_mode: false,
+            manga_auto_advance_secs: 0,
             source_patience_secs: default_patience(),
             default_fansub_template: None,
             fansub_ask_each_time: true,

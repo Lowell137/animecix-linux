@@ -62,6 +62,8 @@ pub struct CoverManager {
     waiters: Rc<RefCell<HashMap<String, Vec<gtk::Picture>>>>,
     queue: Arc<Mutex<VecDeque<String>>>,
     active: Rc<Cell<usize>>,
+    /// Okuma dilimi dokuları (büyük; ayrı ve sınırlı önbellek).
+    slice_cache: Rc<RefCell<HashMap<String, Option<gtk::gdk::Texture>>>>,
 }
 
 impl CoverManager {
@@ -72,6 +74,7 @@ impl CoverManager {
             waiters: Rc::new(RefCell::new(HashMap::new())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             active: Rc::new(Cell::new(0)),
+            slice_cache: Rc::new(RefCell::new(HashMap::new())),
         }
     }
 
@@ -82,6 +85,7 @@ impl CoverManager {
             waiters: self.waiters.clone(),
             queue: self.queue.clone(),
             active: self.active.clone(),
+            slice_cache: self.slice_cache.clone(),
         }
     }
 
@@ -119,6 +123,76 @@ impl CoverManager {
     pub fn load_cover(&self, url: Option<&str>, pic: &gtk::Picture, w: i32, h: i32) {
         let Some(url) = url else { return };
         self.load_cover_impl(&Self::thumb_url(&url, false), pic, w, h);
+    }
+
+    /// Okuma dilimi önbelleği. Kapak önbelleğinden ayrı tutuluyor: bir
+    /// dilim 900x1500 (~5 MB), kapaklar 140x270 (~150 KB). Karıştırılırsa
+    /// onlarca sayfa kapak önbelleğini doldurup belleği şişirir.
+    pub fn slice_cache_get(&self, key: &str) -> Option<Option<gtk::gdk::Texture>> {
+        self.slice_cache.borrow().get(key).cloned()
+    }
+
+    pub fn slice_cache_put(&self, key: &str, t: gtk::gdk::Texture) {
+        const SLICE_CACHE_MAX: usize = 12;
+        let mut c = self.slice_cache.borrow_mut();
+        // Basit FIFO: en eskiyi düşür.
+        while c.len() >= SLICE_CACHE_MAX {
+            if let Some(k) = c.keys().next().cloned() {
+                c.remove(&k);
+            } else {
+                break;
+            }
+        }
+        c.insert(key.to_string(), Some(t));
+    }
+
+    /// Manga okuyucusu: bir webtoon şeridinin TEK dilimini dokuya çevirir.
+    ///
+    /// Manga sayfaları çoğu zaman tek parça uzun şerit (700x13230 gibi).
+    /// Tamamını dokuya pişirmek 37 MB yer; kullanıcı da pencereye sığdırılınca
+    /// okuyamıyor. Bu yüzden kaynak önce okuma genişliğine ölçekleniyor,
+    /// sonra `[y_off .. y_off+len]` satırları KIRPILIYOR. Çözdüğümüz baytları
+    /// çağıran taraf saklıyor; her dilim aynı baytlardan üretilir, yani ağdan
+    /// bir kez iniyor.
+    pub fn manga_slice_texture(
+        bytes: &[u8],
+        out_w: i32,
+        y_off: i32,
+        y_len: i32,
+    ) -> Option<gtk::gdk::Texture> {
+        let loader = gdk_pixbuf::PixbufLoader::new();
+        loader.write(bytes).ok()?;
+        loader.close().ok()?;
+        let src = loader.pixbuf()?;
+        let (sw, sh) = (src.width(), src.height());
+        if sw == 0 || sh == 0 || y_len <= 0 {
+            return None;
+        }
+        // Okuma genişliğine ölçekle (büyütme yok).
+        let dw = out_w.clamp(1, sw);
+        let scale = dw as f64 / sw as f64;
+        let dh = ((sh as f64 * scale).round() as i32).max(1);
+        let scaled = src.scale_simple(dw, dh, gdk_pixbuf::InterpType::Bilinear)?;
+        // Dilim koordinatları ölçeklenmiş uzayda.
+        let y0 = y_off.clamp(0, dh.saturating_sub(1));
+        let hh = y_len.clamp(1, dh - y0);
+        let slice = scaled.new_subpixbuf(0, y0, dw, hh);
+        Some(gtk::gdk::Texture::for_pixbuf(&slice))
+    }
+
+    /// Bir kaynak görselin kaç okuma dilimine bölüneceğini söyler.
+    /// `out_w`/`slice_h` okuma hedefi; sonuç (dilim sayısı, toplam yükseklik).
+    pub fn manga_slice_count(src_w: u32, src_h: u32, out_w: i32, slice_h: i32) -> (usize, i32) {
+        if src_w == 0 || src_h == 0 || out_w <= 0 || slice_h <= 0 {
+            return (0, 0);
+        }
+        let scale = (out_w as f64 / src_w as f64).min(1.0);
+        let dh = ((src_h as f64 * scale).round() as i32).max(1);
+        if dh <= slice_h {
+            return (1, dh);
+        }
+        let n = (dh + slice_h - 1) / slice_h;
+        (n as usize, dh)
     }
 
     /// Manga okuyucusu sayfası.

@@ -769,6 +769,27 @@ impl SettingsView {
         light_row.set_active(settings.light_mode);
         perf_group.add(&light_row);
 
+        // Manga okuyucusu: otomatik sayfa geçişi (0 = kapalı).
+        let auto_row = adw::ActionRow::new();
+        auto_row.set_title("Manga Otomatik Geçiş");
+        auto_row.set_subtitle("Okuyucuda sayfa belirtilen süre sonra kendiliğinden ilerler. 0 kapatır.");
+        let auto_adj = gtk::Adjustment::new(
+            settings.manga_auto_advance_secs as f64,
+            0.0,
+            120.0,
+            1.0,
+            5.0,
+            0.0,
+        );
+        let auto_spin = gtk::SpinButton::new(Some(&auto_adj), 1.0, 0);
+        auto_spin.set_valign(gtk::Align::Center);
+        let auto_suffix = gtk::Label::new(Some("sn"));
+        auto_suffix.set_valign(gtk::Align::Center);
+        auto_row.add_suffix(&auto_spin);
+        auto_row.add_suffix(&auto_suffix);
+        auto_row.set_activatable_widget(Some(&auto_spin));
+        perf_group.add(&auto_row);
+
         let patience_row = adw::ActionRow::new();
         patience_row.set_title("Kaynak Açılış Sabrı");
         patience_row.set_subtitle("Yavaş internet için artırın. Medya hiç açılmazsa ölü kaynakta bu kadar saniye (20-120) beklenir, sonra sıradakine geçilir.");
@@ -1003,6 +1024,7 @@ impl SettingsView {
                     _ => "off".into(),
                 };
                 updated.light_mode = light_r.is_active();
+                updated.manga_auto_advance_secs = auto_adj.value().max(0.0) as u64;
                 updated.source_patience_secs = patience_spin_c.value() as u64;
                 updated.fansub_ask_each_time = ask_r.is_active();
                 updated.local_history_enabled = hist_r.is_active();
