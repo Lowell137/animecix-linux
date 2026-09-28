@@ -131,6 +131,21 @@ fn main() {
 
     std::env::set_var("MALLOC_ARENA_MAX", "2");
 
+    // Doku verileri (GdkTexture) 100 KB+ bloklar; glibc bunları heap'te
+    // tutuyor ve serbest bırakıldığında RSS'te kalıyor. Eşiğe mmap
+    // koyunca serbest bırakılan doku anında OS'e döner.
+    //
+    // Daha önce `malloc_trim` + `MALLOC_TRIM_THRESHOLD_` denemiştim; o her
+    // serbestlemede tüm arena'ları gezip UI'yi donduruyordu. Mallopt tek
+    // seferlik bir ayar, sayfa geçişlerinde tarama yok.
+    //
+    // M_MMAP_THRESHOLD_ elle verilince glibc'in "dinamik eşik" büyütmesi
+    // de kapanır (aksi halde ilk büyük blok serbest bırakılınca eşik onu
+    // geçecek şekilde büyür ve ayar etkisini yitirirdi).
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 64 * 1024);
+    }
+
     let app_id = std::env::var("FLATPAK_ID").unwrap_or_else(|_| "tr.com.animecix".to_string());
     let app = adw::Application::builder()
         .application_id(&app_id)

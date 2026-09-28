@@ -146,7 +146,19 @@ impl Title {
         }
     }
 
+    /// Kullanıcı verisi uçları (geçmiş, watchlist) animecix.tv dışındaki
+    /// içerikleri de döndürebiliyor — aynı hesap altındaki MangaciX manga
+    /// kayıtları buraya `title_type` **boş** geliyor. Animecix'in kendi
+    /// uçlarında ise alan her başlıkta dolu (anime/movie), yani boşluk
+    /// güvenilir bir "bu bir anime değil" işaretidir.
+    pub fn is_anime_entry(r: &serde_json::Value) -> bool {
+        matches!(r["title_type"].as_str(), Some("anime") | Some("movie"))
+    }
+
     pub fn from_value(r: &serde_json::Value) -> Option<Title> {
+        if !Self::is_anime_entry(r) {
+            return None;
+        }
         let id = r["id"].as_u64().or_else(|| r["title_id"].as_u64())?;
         let tt = r["title_type"].as_str().unwrap_or("").to_string();
         let genres = r["genres"].as_array().map(|arr| {
@@ -1198,9 +1210,7 @@ impl Client {
                 let mut items = Vec::new();
                 if let Some(arr) = lst["items"].as_array() {
                     for it in arr {
-                        let t = it["title_type"].as_str().unwrap_or("");
-                        let m = it["model_type"].as_str().unwrap_or("");
-                        if t != "anime" && t != "movie" && m != "title" {
+                        if !Title::is_anime_entry(it) {
                             continue;
                         }
                         if it["id"].as_u64().or_else(|| it["title_id"].as_u64()).is_some() {
@@ -3612,6 +3622,28 @@ mod tests {
         let title = Title::from_value(&t).expect("related parse edilmeli");
         assert_eq!(title.id, 7817);
         assert_eq!(title.rating, Some(8.7));
+    }
+
+    #[test]
+    fn manga_kayitlari_baslik_olmaz() {
+        // Aynı hesap altındaki MangaciX manga kayıtları geçmiş ve
+        // watchlist uçlarından `title_type` BOŞ geliyor. AnimeciX'in
+        // kendi uçlarında alan dolu olduğu için boşluk güvenilir işaret.
+        let manga = serde_json::json!({
+            "id": 12565, "name": "Banya", "type": null, "model_type": null,
+            "poster": null, "genres": [{"name": "Manga"}]
+        });
+        assert!(
+            Title::from_value(&manga).is_none(),
+            "manga kaydı başlığa dönüşmemeli"
+        );
+        // Film ve anime geçmeli.
+        for tt in ["anime", "movie"] {
+            let ok = serde_json::json!({
+                "id": 7, "name": "Ornek", "title_type": tt, "year": 2020
+            });
+            assert!(Title::from_value(&ok).is_some(), "{tt} kabul edilmeli");
+        }
     }
 
     #[test]

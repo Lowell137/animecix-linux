@@ -307,7 +307,9 @@ impl CoverManager {
             // Tüm doku önbelleğini birden temizlemek, görünür posterlerin
             // yeniden decode edilmesine yol açıp sayfaları yavaşlatıyordu.
             // Bunun yerine yalnızca fazla girdileri kademeli düşür.
-            const TEX_CACHE_MAX: usize = 96;
+            // 96 doku ~200 MB tutuyordu; 40, bir sayfada görünen kart
+            // sayısının rahat üstü ve iki ekran geriye kadar yeterli.
+            const TEX_CACHE_MAX: usize = 40;
             let mut cache = self.cache.borrow_mut();
             while cache.len() > TEX_CACHE_MAX {
                 let Some(k) = cache.keys().next().cloned() else { break };
