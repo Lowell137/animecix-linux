@@ -1245,17 +1245,18 @@ impl Client {
         Ok(cats)
     }
 
-    /// Manga modunun ana sayfa listeleri. MangaCiX ayrı bir uygulama olarak
-    /// aynı hesabı kullanıyor, bu yüzden veri aynı anda iki uygulamada da
-    /// duruyordu; burada ayrı bir önbellek anahtarı ve ayrı bir taban adres
-    /// kullanıyoruz. Manga girdilerinde `title_type` boş geldiği için
-    /// `Title::from_value` burada kullanılmaz — `is_manga_entry` ters yönde
-    /// filtreler.
-    pub fn manga_home_lists(&self) -> Result<Vec<Category>, String> {
-        let d = self.cache_get("manga_lists", API_TTL_SECS, |http| {
-            http.get(format!("{MANGA_BASE}/secure/homepage/lists-guests"))
+    /// Manga modunun "son bölümler" şeridi.
+    ///
+    /// MangaCiX'in kendi ana sayfası `lists-guests` kullanmıyor; iki kaynaktan
+    /// kuruluyor: `/secure/last-episodes` ve `/secure/titles?order=desc`.
+    /// Alan yapısı anime ile birebir aynı, tek fark taban adresi.
+    pub fn manga_last_episodes(&self, page: u32) -> Result<(Vec<LastEpisode>, usize, u32), String> {
+        let page = page.max(1);
+        let key = format!("manga_lastep:{page}");
+        let d = self.cache_get(&key, 900, |http| {
+            http.get(format!("{MANGA_BASE}/secure/last-episodes"))
                 .header("Accept", "application/json")
-                .header("X-Requested-With", "XMLHttpRequest")
+                .query(&[("page", &page.to_string())])
                 .send()
                 .map_err(|e| e.to_string())?
                 .error_for_status()
@@ -1263,34 +1264,62 @@ impl Client {
                 .json()
                 .map_err(|e| e.to_string())
         })?;
-        let mut cats = Vec::new();
-        if let Some(lists) = d["lists"].as_array() {
-            for lst in lists {
-                let mut items = Vec::new();
-                if let Some(arr) = lst["items"].as_array() {
-                    for it in arr {
-                        if it["id"].as_u64().is_none() {
-                            continue;
-                        }
-                        if let Some(mut t) = Title::from_value_lenient(it) {
-                            // Manga girdilerinde `title_type` boş; arayüz
-                            // etiketleri (TV/Film) doğru görünsün diye doldur.
-                            if t.title_type.is_none() {
-                                t.title_type = Some("manga".into());
-                            }
-                            items.push(t);
-                        }
-                    }
-                }
-                if !items.is_empty() {
-                    cats.push(Category {
-                        name: lst["name"].as_str().unwrap_or("").to_string(),
-                        items,
-                    });
-                }
+        let total = d["total"].as_u64().unwrap_or(0) as usize;
+        let last = d["last_page"].as_u64().unwrap_or(1).max(1) as u32;
+        let mut out = Vec::new();
+        if let Some(arr) = d["data"].as_array() {
+            for e in arr {
+                out.push(LastEpisode {
+                    title_id: Self::u64_field(e, "title_id"),
+                    title_name: Self::str_field(e, "title_name"),
+                    title_poster: e["title_poster"]
+                        .as_str()
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty()),
+                    title_type: e["title_type"].as_str().map(|x| x.to_string()),
+                    season: Self::u64_field(e, "season_number"),
+                    episode: Self::u64_field(e, "episode_number"),
+                    release_date: Self::str_field(e, "release_date"),
+                });
             }
         }
-        Ok(cats)
+        Ok((out, total, last))
+    }
+
+    /// Manga kataloğu: `/secure/titles?order=desc` (X-E-H imzalı).
+    /// Manga girdilerinde `title_type` `manga`/`manhwa`; alan boş gelirse
+    /// `manga` varsayılır.
+    pub fn manga_catalog(&self) -> Result<Vec<Title>, String> {
+        let q = "order=desc&perPage=20";
+        let d = self.cache_get("manga_catalog", 3600, |http| {
+            let sig = crate::xeh::sign_query(q)?;
+            http.get(format!("{MANGA_BASE}/secure/titles?{q}"))
+                .header("Accept", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("X-E-H", &sig)
+                .send()
+                .map_err(|e| e.to_string())?
+                .error_for_status()
+                .map_err(|e| e.to_string())?
+                .json()
+                .map_err(|e| e.to_string())
+        })?;
+        let pg = if d["pagination"].is_object() { &d["pagination"] } else { &d };
+        let arr = pg["data"]
+            .as_array()
+            .or_else(|| pg["items"].as_array())
+            .or_else(|| pg["titles"].as_array());
+        let Some(arr) = arr else { return Ok(Vec::new()) };
+        let mut out = Vec::new();
+        for v in arr {
+            if let Some(mut t) = Title::from_value_lenient(v) {
+                if t.title_type.is_none() {
+                    t.title_type = Some("manga".into());
+                }
+                out.push(t);
+            }
+        }
+        Ok(out)
     }
 
     pub fn search(&self, q: &str) -> Result<Vec<Title>, String> {

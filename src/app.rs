@@ -115,8 +115,9 @@ fn sidebar_id_key(id: SidebarId) -> Option<&'static str> {
     }
 }
 pub enum Msg {
-    /// Manga modunun ana sayfa listeleri.
-    MangaCats(Result<Vec<api::Category>, String>),
+    /// Manga ana sayfa verisi: (son bölümler şeridi, katalog başlıkları).
+    /// MangaCiX'in kendi ana sayfası gibi iki kaynaktan geliyor.
+    MangaHome(Result<(Vec<LastEpisode>, Vec<Title>), String>),
     Cats(Result<Vec<api::Category>, String>),
     Search(Result<Vec<Title>, String>),
     Eps(Title, Result<Vec<Episode>, String>, Vec<(u64, u64, f64)>),
@@ -195,6 +196,8 @@ pub struct App {
     pub cats: Rc<RefCell<Vec<api::Category>>>,
     /// Manga modunun ana sayfa listeleri (mod düğmesiyle ayrı önbellek).
     pub manga_cats: Rc<RefCell<Vec<api::Category>>>,
+    /// Manga ana sayfasının "son bölümler" şeridi.
+    pub manga_rail: Rc<RefCell<Vec<LastEpisode>>>,
     /// O anki mod: true = manga. Ayar dosyasına yazılır.
     pub manga_mode: Rc<Cell<bool>>,
     pub search_results: Rc<RefCell<Vec<Title>>>,
@@ -799,6 +802,7 @@ impl App {
             page_history: Rc::new(RefCell::new(vec![initial_page.clone()])),
             cats: Rc::new(RefCell::new(Vec::new())),
             manga_cats: Rc::new(RefCell::new(Vec::new())),
+            manga_rail: Rc::new(RefCell::new(Vec::new())),
             manga_mode: Rc::new(Cell::new(false)),
             search_results: Rc::new(RefCell::new(Vec::new())),
             settings: Rc::new(RefCell::new(client.load_settings())),
@@ -983,6 +987,7 @@ impl App {
             page_history: self.page_history.clone(),
             cats: self.cats.clone(),
             manga_cats: self.manga_cats.clone(),
+            manga_rail: self.manga_rail.clone(),
             manga_mode: self.manga_mode.clone(),
             search_results: self.search_results.clone(),
             settings: self.settings.clone(),
@@ -3089,10 +3094,13 @@ impl App {
     }
 
     fn fetch_manga_home(&self) {
-        eprintln!("[MANGA] ana sayfa listeleri çekiliyor");
+        eprintln!("[MANGA] son bölümler + katalog çekiliyor");
         self.spawn(move |c| {
-            let res = c.manga_home_lists();
-            move || Msg::MangaCats(res)
+            // MangaCiX'in ana sayfası da iki kaynaktan kuruluyor; ikisi de
+            // hata verirse sayfa yine de çizilsin diye hata yutulur.
+            let eps = c.manga_last_episodes(1).map(|(v, _, _)| v).unwrap_or_default();
+            let cat = c.manga_catalog().unwrap_or_default();
+            move || Msg::MangaHome(Ok((eps, cat)))
         });
     }
 
@@ -3102,20 +3110,33 @@ impl App {
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hexpand(true);
         scroll.set_vexpand(true);
-        let cats = self.manga_cats.borrow();
-
-        if cats.is_empty() {
+        // Boşsa iki kaynaktan da veri gelmemiş demektir; sonsuz spinner yerine
+        // durum sayfası göster, yeniden dene.
+        let rail = self.manga_rail.borrow().clone();
+        let cats = self.manga_cats.borrow().clone();
+        if cats.is_empty() && rail.is_empty() {
             let box_ = gtk::Box::new(gtk::Orientation::Vertical, 16);
             box_.set_valign(gtk::Align::Center);
             box_.set_halign(gtk::Align::Center);
             box_.set_vexpand(true);
-            let sp = gtk::Spinner::new();
-            sp.set_size_request(48, 48);
-            sp.start();
-            let lbl = gtk::Label::new(Some("Manga serileri yükleniyor…"));
+            let lbl = gtk::Label::new(Some("Manga içeriği yüklenemedi."));
             lbl.add_css_class("dim-label");
+            let sp = gtk::Spinner::new();
+            sp.set_size_request(40, 40);
+            sp.start();
+            let again = gtk::Button::with_label("Yeniden Dene");
+            again.add_css_class("pill");
+            again.add_css_class("suggested-action");
+            {
+                let this = self.clone_ref();
+                again.connect_clicked(move |_| {
+                    this.fetch_manga_home();
+                    this.show_page(&Page::MangaHome);
+                });
+            }
             box_.append(&sp);
             box_.append(&lbl);
+            box_.append(&again);
             scroll.set_child(Some(&box_));
             return scroll;
         }
@@ -3127,6 +3148,10 @@ impl App {
         main_box.set_margin_start(12);
         main_box.set_margin_end(12);
 
+        // MangaCiX'in ana sayfası da önce "son bölümler" şeridini koyuyor.
+        if !rail.is_empty() {
+            main_box.append(&self.build_last_section(&rail));
+        }
         for (idx, cat) in cats.iter().enumerate() {
             main_box.append(&self.build_carousel(cat, idx));
         }
@@ -6873,10 +6898,19 @@ impl App {
 
     fn handle_msg(&self, msg: Msg) {
         match msg {
-            Msg::MangaCats(res) => match res {
-                Ok(cats) => {
-                    eprintln!("[MANGA] {} liste geldi", cats.len());
-                    *self.manga_cats.borrow_mut() = cats;
+            Msg::MangaHome(res) => match res {
+                Ok((eps, titles)) => {
+                    eprintln!(
+                        "[MANGA] {} son bölüm + {} katalog başlığı",
+                        eps.len(),
+                        titles.len()
+                    );
+                    *self.manga_cats.borrow_mut() = if titles.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![api::Category { name: "Katalog".to_string(), items: titles }]
+                    };
+                    *self.manga_rail.borrow_mut() = eps;
                     // Geçmişe bakma: mod düğmesi show_page çağırıyor ama
                     // history'ye eklemiyor. Görünür yığın çocuğuna bakalım.
                     if self
