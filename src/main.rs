@@ -511,25 +511,27 @@ fn main() {
                    Ortadaki .flat MenuButton: "AnimeciX ▾". Popover'da iki
                    mod satırı, aktif olanın sağında onay işareti. */
                 .title-menu {
-                    /* Zemin tamamen kaldırıldı: başlık zaten kalın ve
-                       büyük; kutuya gerek yok, hover hariç. */
+                    /* Zemin tamamen kaldırıldı: normalde, hover'da ve
+                       menü açıkken bile arka plan yok. */
                     background-color: transparent;
                     background-image: none;
                     border: none;
                     box-shadow: none;
+                    outline: none;
                     border-radius: 6px;
-                    padding: 6px 14px;
+                    padding: 2px 8px;
                     color: #ffffff;
-                    font-size: 17px;
+                    font-size: 15px;
                     font-weight: 700;
                 }
                 .title-menu:hover,
-                .title-menu[active] {
-                    background-color: rgba(255, 255, 255, 0.08);
+                .title-menu[active],
+                .title-menu:focus-visible {
+                    background-color: transparent;
                 }
                 .title-menu-label { color: #ffffff; }
                 .title-menu-chevron {
-                    -gtk-icon-size: 14px;
+                    -gtk-icon-size: 12px;
                     opacity: 0.55;
                     color: #9a9996;
                     margin-start: 2px;

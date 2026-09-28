@@ -547,19 +547,16 @@ impl App {
         menu_box.add_css_class("title-menu-list");
         let mode_anime = gtk::Button::new();
         let mode_manga = gtk::Button::new();
-        for (btn, icon, text) in [
-            (&mode_anime, "video-display-symbolic", "AnimeciX"),
-            (&mode_manga, "comic-book-symbolic", "Mangacix"),
-        ] {
+        // Satırlarda ikon YOK: yalnız yazı ve sağda onay işareti. İki
+        // mod arasında simge farkı olmasın, seçim onayla belli olsun.
+        for (btn, text) in [(&mode_anime, "AnimeciX"), (&mode_manga, "Mangacix")] {
             btn.add_css_class("title-menu-item");
-            let inner = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-            let ic = gtk::Image::from_icon_name(icon);
+            let inner = gtk::Box::new(gtk::Orientation::Horizontal, 8);
             let lbl = gtk::Label::new(Some(text));
             lbl.set_xalign(0.0);
             lbl.set_hexpand(true);
             let check = gtk::Image::from_icon_name("object-select-symbolic");
             check.add_css_class("title-menu-check");
-            inner.append(&ic);
             inner.append(&lbl);
             inner.append(&check);
             btn.set_child(Some(&inner));
