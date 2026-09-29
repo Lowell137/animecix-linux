@@ -569,42 +569,48 @@ pub(crate) fn download_to_file(
     Ok(done)
 }
 
-/// Bölüm indirme penceresi (ilerleme + iptal).
-fn start_download(
-    parent: &adw::ApplicationWindow,
-    toast: &adw::ToastOverlay,
+/// URL'den dosya uzantısını çıkar; geçersiz/boşsa "mp4".
+fn guess_ext(url: &str) -> String {
+    let ext = url.split('?').next().unwrap_or("").rsplit('.').next().unwrap_or("");
+    if !ext.is_empty() && ext.len() <= 4 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        ext.to_string()
+    } else {
+        "mp4".into()
+    }
+}
+
+/// İndirme hedefini (tam yol, dosya adı) üretir.
+fn download_dest(
     url: &str,
     title_name: &str,
     season: u64,
     episode: u64,
     ep_name: &str,
-) {
-    let ext = url
-        .split('?')
-        .next()
-        .unwrap_or("")
-        .rsplit('.')
-        .next()
-        .unwrap_or("")
-        .to_string();
-    let ext = if !ext.is_empty() && ext.len() <= 4 && ext.chars().all(|c| c.is_ascii_alphanumeric()) {
-        ext
-    } else {
-        "mp4".into()
-    };
+) -> (std::path::PathBuf, String) {
     let fname = format!(
         "{} S{:02}E{:02} - {}.{}",
         safe_fname(title_name),
         season,
         episode,
         safe_fname(ep_name),
-        ext
+        guess_ext(url)
     );
     let dir = glib::user_special_dir(glib::UserDirectory::Videos)
         .map(|p| p.join("Animecix"))
         .unwrap_or_else(|| std::path::PathBuf::from("/tmp/Animecix"));
-    let path = dir.join(&fname);
+    (dir.join(&fname), fname)
+}
 
+/// İndirme ilerleme penceresinin parçaları.
+struct DownloadDialog {
+    win: gtk::Window,
+    bar: gtk::ProgressBar,
+    status: gtk::Label,
+    cancel: gtk::Button,
+}
+
+/// İlerleme + iptal içeren indirme penceresini kurar.
+fn build_download_dialog(parent: &adw::ApplicationWindow, fname: &str) -> DownloadDialog {
     let win = gtk::Window::builder()
         .title("Bölüm indiriliyor")
         .modal(true)
@@ -617,33 +623,46 @@ fn start_download(
     v.set_margin_bottom(16);
     v.set_margin_start(16);
     v.set_margin_end(16);
-    let name_lbl = gtk::Label::new(Some(&fname));
+    let name_lbl = gtk::Label::new(Some(fname));
     name_lbl.set_wrap(true);
     name_lbl.set_max_width_chars(48);
     let bar = gtk::ProgressBar::new();
     bar.set_show_text(true);
     let status = gtk::Label::new(Some("bağlanıyor…"));
     status.add_css_class("dim-label");
-    let cancel_btn = gtk::Button::with_label("İptal");
-    cancel_btn.add_css_class("destructive-action");
+    let cancel = gtk::Button::with_label("İptal");
+    cancel.add_css_class("destructive-action");
     v.append(&name_lbl);
     v.append(&bar);
     v.append(&status);
-    v.append(&cancel_btn);
+    v.append(&cancel);
     win.set_child(Some(&v));
+    DownloadDialog { win, bar, status, cancel }
+}
 
+/// İndirmeyi arka planda başlatır; ilerleme/bitişi 200ms'lik poll ile UI'a yansıtır.
+fn run_download(
+    dlg: DownloadDialog,
+    url: &str,
+    path: std::path::PathBuf,
+    fname: String,
+    toast: &adw::ToastOverlay,
+) {
+    let DownloadDialog { win, bar, status, cancel: cancel_btn } = dlg;
     let (prog_tx, prog_rx) = std::sync::mpsc::channel::<(u64, Option<u64>)>();
     let (done_tx, done_rx) = std::sync::mpsc::channel::<Result<u64, String>>();
     let cancel = Arc::new(AtomicBool::new(false));
-    let cancel_c = cancel.clone();
-    let url_c = url.to_string();
-    let path_c = path.clone();
-    std::thread::spawn(move || {
-        let res = download_to_file(&url_c, &path_c, |d, t| {
-            let _ = prog_tx.send((d, t));
-        }, &cancel_c);
-        let _ = done_tx.send(res);
-    });
+    {
+        let cancel_c = cancel.clone();
+        let url_c = url.to_string();
+        let path_c = path.clone();
+        std::thread::spawn(move || {
+            let res = download_to_file(&url_c, &path_c, |d, t| {
+                let _ = prog_tx.send((d, t));
+            }, &cancel_c);
+            let _ = done_tx.send(res);
+        });
+    }
     {
         let cancel_c = cancel.clone();
         cancel_btn.connect_clicked(move |_| {
@@ -703,7 +722,22 @@ fn start_download(
             }
         }
     });
-    win.present();
+}
+
+/// Bölüm indirme penceresi (ilerleme + iptal).
+fn start_download(
+    parent: &adw::ApplicationWindow,
+    toast: &adw::ToastOverlay,
+    url: &str,
+    title_name: &str,
+    season: u64,
+    episode: u64,
+    ep_name: &str,
+) {
+    let (path, fname) = download_dest(url, title_name, season, episode, ep_name);
+    let dlg = build_download_dialog(parent, &fname);
+    dlg.win.present();
+    run_download(dlg, url, path, fname, toast);
 }
 
 /// Video bilgi penceresi.
@@ -745,71 +779,56 @@ fn skip_target(t: &AniSkipTimes, pos: f64, op_done: bool, ed_done: bool) -> Opti
     None
 }
 
-/// Sağ tık bağlam menüsünü o anki duruma göre kurar.
-#[allow(clippy::too_many_arguments)]
-fn rebuild_ctx_menu(
-    pop: &gtk::Popover,
-    state: &Rc<RefCell<PlayerState>>,
-    controls: &gtk::Revealer,
-    toast: &adw::ToastOverlay,
-    win: &adw::ApplicationWindow,
-    play_cb: &Option<Rc<dyn Fn(Episode)>>,
-    prev: &Option<Episode>,
-    next: &Option<Episode>,
-    dl: &(String, u64, u64, String),
-) {
-    let v = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    v.set_margin_top(6);
-    v.set_margin_bottom(6);
-    v.set_margin_start(6);
-    v.set_margin_end(6);
+/// Bağlam menüsü satırlarını kurarken paylaşılan oynatıcı bağlamı.
+struct CtxMenu<'a> {
+    v: gtk::Box,
+    pop: &'a gtk::Popover,
+    state: &'a Rc<RefCell<PlayerState>>,
+    controls: &'a gtk::Revealer,
+    toast: &'a adw::ToastOverlay,
+    win: &'a adw::ApplicationWindow,
+    play_cb: &'a Option<Rc<dyn Fn(Episode)>>,
+    prev: &'a Option<Episode>,
+    next: &'a Option<Episode>,
+    dl: &'a (String, u64, u64, String),
+}
 
-    let (paused, skip, fill, cur_url) = {
-        let s = state.borrow();
-        let t = s.aniskip.lock().unwrap().clone();
-        let sk = skip_target(&t, s.player.pos(), s.op_seek_done, s.ed_seek_done);
-        let url = match &s.sources[s.index] {
-            Source::Direct(u) => Some(u.clone()),
-            Source::Embed(_) => None,
-        };
-        (s.player.paused(), sk, s.player.panscan() >= 0.5, url)
-    };
-
-    // oynat / duraklat
-    {
-        let st_c = state.clone();
+impl CtxMenu<'_> {
+    /// Oynat / duraklat satırı.
+    fn play_pause(&self, paused: bool) {
+        let st_c = self.state.clone();
         ctx_row(
-            &v, pop,
+            &self.v, self.pop,
             if paused { "Oynat" } else { "Duraklat" },
             if paused { "media-playback-start-symbolic" } else { "media-playback-pause-symbolic" },
             true, Some("Space"),
             move || { toggle_with_flash(&st_c); },
         );
     }
-    // tam ekran
-    {
-        let st_c = state.clone();
-        let rev_c = controls.clone();
-        let is_fs = win.is_fullscreen();
+
+    /// Tam ekran satırı.
+    fn fullscreen(&self, is_fs: bool) {
+        let st_c = self.state.clone();
+        let rev_c = self.controls.clone();
         ctx_row(
-            &v, pop,
+            &self.v, self.pop,
             if is_fs { "Pencereli moda dön" } else { "Tam ekran" },
             if is_fs { "view-restore-symbolic" } else { "view-fullscreen-symbolic" },
             true, Some("F"),
             move || set_fullscreen(&st_c, &rev_c, !is_fs),
         );
     }
-    ctx_sep(&v);
-    // intro / outro atla
-    {
-        let st_c = state.clone();
-        let toast_c = toast.clone();
+
+    /// İntro/outro atla satırı.
+    fn skip(&self, skip: Option<(f64, bool)>) {
+        let st_c = self.state.clone();
+        let toast_c = self.toast.clone();
         let (lbl, target) = match skip {
             Some((t, true)) => ("İntroyu atla".to_string(), Some(t)),
             Some((t, false)) => ("Outro'yu atla".to_string(), Some(t)),
             None => ("Atlanacak yer yok".to_string(), None),
         };
-        ctx_row(&v, pop, &lbl, "media-seek-forward-symbolic", target.is_some(), Some("S"), move || {
+        ctx_row(&self.v, self.pop, &lbl, "media-seek-forward-symbolic", target.is_some(), Some("S"), move || {
             if let (Some(t), Ok(mut s)) = (target, st_c.try_borrow_mut()) {
                 if s.aniskip.lock().unwrap().clone().op_end == Some(t) {
                     s.op_seek_done = true;
@@ -822,29 +841,30 @@ fn rebuild_ctx_menu(
             }
         });
     }
-    // önceki / sonraki bölüm
-    {
-        let cb_c = play_cb.clone();
-        let p = prev.clone();
-        ctx_row(&v, pop, "Önceki bölüm", "media-skip-backward-symbolic", p.is_some() && cb_c.is_some(), None, move || {
+
+    /// Önceki / sonraki bölüm satırları.
+    fn neighbors(&self) {
+        let cb_c = self.play_cb.clone();
+        let p = self.prev.clone();
+        ctx_row(&self.v, self.pop, "Önceki bölüm", "media-skip-backward-symbolic", p.is_some() && cb_c.is_some(), None, move || {
             if let (Some(cb), Some(ep)) = (cb_c.as_ref(), p.as_ref()) {
                 cb(ep.clone());
             }
         });
-        let cb_c2 = play_cb.clone();
-        let n = next.clone();
-        ctx_row(&v, pop, "Sonraki bölüm", "media-skip-forward-symbolic", n.is_some() && cb_c2.is_some(), None, move || {
+        let cb_c2 = self.play_cb.clone();
+        let n = self.next.clone();
+        ctx_row(&self.v, self.pop, "Sonraki bölüm", "media-skip-forward-symbolic", n.is_some() && cb_c2.is_some(), None, move || {
             if let (Some(cb), Some(ep)) = (cb_c2.as_ref(), n.as_ref()) {
                 cb(ep.clone());
             }
         });
     }
-    ctx_sep(&v);
-    // doldur / sığdır
-    {
-        let st_c = state.clone();
+
+    /// Doldur / orijinal oran satırı.
+    fn fill(&self, fill: bool) {
+        let st_c = self.state.clone();
         ctx_row(
-            &v, pop,
+            &self.v, self.pop,
             if fill { "Orijinal oran" } else { "Ekranı doldur" },
             "view-fullscreen-symbolic",
             true, Some("A"),
@@ -855,13 +875,14 @@ fn rebuild_ctx_menu(
             },
         );
     }
-    // ekran görüntüsü
-    {
-        let st_c = state.clone();
-        let toast_c = toast.clone();
-        let win_cc = win.clone();
-        let (tn, ts, te) = (dl.0.clone(), dl.1, dl.2);
-        ctx_row(&v, pop, "Ekran görüntüsü al", "camera-photo-symbolic", true, None, move || {
+
+    /// Ekran görüntüsü al satırı (dosyaya kaydet + panoya kopyala).
+    fn screenshot(&self) {
+        let st_c = self.state.clone();
+        let toast_c = self.toast.clone();
+        let win_cc = self.win.clone();
+        let (tn, ts, te) = (self.dl.0.clone(), self.dl.1, self.dl.2);
+        ctx_row(&self.v, self.pop, "Ekran görüntüsü al", "camera-photo-symbolic", true, None, move || {
             let pics = glib::user_special_dir(glib::UserDirectory::Pictures)
                 .unwrap_or_else(|| std::path::PathBuf::from("/tmp"));
             let ts_now = std::time::SystemTime::now()
@@ -893,32 +914,76 @@ fn rebuild_ctx_menu(
             toast_in(&toast_c, &msg, 4);
         });
     }
-    // video bilgisi
-    {
-        let st_c = state.clone();
-        let win_c = win.clone();
-        let heading = format!("{} S{:02}E{:02}", dl.0, dl.1, dl.2);
-        ctx_row(&v, pop, "Video bilgisi", "dialog-information-symbolic", true, None, move || {
+
+    /// Video bilgisi satırı.
+    fn video_info(&self) {
+        let st_c = self.state.clone();
+        let win_c = self.win.clone();
+        let heading = format!("{} S{:02}E{:02}", self.dl.0, self.dl.1, self.dl.2);
+        ctx_row(&self.v, self.pop, "Video bilgisi", "dialog-information-symbolic", true, None, move || {
             let info = st_c.try_borrow().map(|s| s.player.video_info()).unwrap_or_default();
             show_video_info(&win_c, &heading, &info);
         });
     }
-    ctx_sep(&v);
-    // indir
-    {
-        let toast_c = toast.clone();
-        let win_c = win.clone();
-        let (tn, ts, te, ten) = (dl.0.clone(), dl.1, dl.2, dl.3.clone());
-        let cur = cur_url.clone();
-        ctx_row(&v, pop, "Bölümü indir", "folder-download-symbolic", cur_url.is_some(), None, move || {
-            match cur.as_deref() {
+
+    /// Bölümü indir satırı.
+    fn download(&self, cur_url: Option<String>) {
+        let toast_c = self.toast.clone();
+        let win_c = self.win.clone();
+        let (tn, ts, te, ten) = (self.dl.0.clone(), self.dl.1, self.dl.2, self.dl.3.clone());
+        ctx_row(&self.v, self.pop, "Bölümü indir", "folder-download-symbolic", cur_url.is_some(), None, move || {
+            match cur_url.as_deref() {
                 Some(u) => start_download(&win_c, &toast_c, u, &tn, ts, te, &ten),
                 None => toast_in(&toast_c, "Önce kaynağın açılmasını bekle", 3),
             }
         });
     }
+}
 
-    pop.set_child(Some(&v));
+/// Sağ tık bağlam menüsünü o anki duruma göre kurar.
+#[allow(clippy::too_many_arguments)]
+fn rebuild_ctx_menu(
+    pop: &gtk::Popover,
+    state: &Rc<RefCell<PlayerState>>,
+    controls: &gtk::Revealer,
+    toast: &adw::ToastOverlay,
+    win: &adw::ApplicationWindow,
+    play_cb: &Option<Rc<dyn Fn(Episode)>>,
+    prev: &Option<Episode>,
+    next: &Option<Episode>,
+    dl: &(String, u64, u64, String),
+) {
+    let (paused, skip, fill, cur_url) = {
+        let s = state.borrow();
+        let t = s.aniskip.lock().unwrap().clone();
+        let sk = skip_target(&t, s.player.pos(), s.op_seek_done, s.ed_seek_done);
+        let url = match &s.sources[s.index] {
+            Source::Direct(u) => Some(u.clone()),
+            Source::Embed(_) => None,
+        };
+        (s.player.paused(), sk, s.player.panscan() >= 0.5, url)
+    };
+
+    let v = gtk::Box::new(gtk::Orientation::Vertical, 2);
+    v.set_margin_top(6);
+    v.set_margin_bottom(6);
+    v.set_margin_start(6);
+    v.set_margin_end(6);
+    let m = CtxMenu { v, pop, state, controls, toast, win, play_cb, prev, next, dl };
+
+    m.play_pause(paused);
+    m.fullscreen(m.win.is_fullscreen());
+    ctx_sep(&m.v);
+    m.skip(skip);
+    m.neighbors();
+    ctx_sep(&m.v);
+    m.fill(fill);
+    m.screenshot();
+    m.video_info();
+    ctx_sep(&m.v);
+    m.download(cur_url);
+
+    m.pop.set_child(Some(&m.v));
 }
 
 fn fmt_bytes(b: u64) -> String {
