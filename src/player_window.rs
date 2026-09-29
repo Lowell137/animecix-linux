@@ -1113,6 +1113,214 @@ fn vol_icon(volume: f64, muted: bool) -> &'static str {    if muted || volume <=
     }
 }
 
+/// Alt kontrol çubuğunun tutamaçları (`build_control_bar` üretir).
+struct ControlBar {
+    controls: gtk::Box,
+    controls_revealer: gtk::Revealer,
+    center_rev: gtk::Revealer,
+    play_btn: gtk::Button,
+    back10_btn: gtk::Button,
+    fwd10_btn: gtk::Button,
+    seek: gtk::Scale,
+    cur_lbl: gtk::Label,
+    dur_lbl: gtk::Label,
+    vol_btn: gtk::Button,
+    vol_scale: gtk::Scale,
+    src_lbl: gtk::Label,
+    speed_btn: gtk::MenuButton,
+    speed_pop: gtk::Popover,
+    speed_box: gtk::Box,
+    quality_btn: gtk::MenuButton,
+    quality_pop: gtk::Popover,
+    quality_box: gtk::Box,
+    bot_title: gtk::Label,
+    status: gtk::Label,
+}
+
+/// Alt kontrol çubuğunu kurar: başlık · seek/zaman · ses · hız · kalite pill'leri
+/// ve ortadaki [−10][oynat/duraklat][+10] kümesi. Revealer'ları sahneye gömer.
+fn build_control_bar(
+    stage: &gtk::Overlay,
+    start_volume: f64,
+    start_muted: bool,
+    media_title: &str,
+) -> ControlBar {
+    // alt kontrol barı (revealer içinde, fare boşta kalınca gizlenir)
+    let controls = gtk::Box::new(gtk::Orientation::Vertical, 6);
+    controls.add_css_class("embed-controls");
+    controls.set_valign(gtk::Align::End);
+    controls.set_margin_start(16);
+    controls.set_margin_end(16);
+    controls.set_margin_bottom(12);
+
+    // --- orta kontroller: Kitsune mimarisi [−10][oynat/duraklat][+10] ---
+    let play_btn = gtk::Button::from_icon_name("media-playback-start-symbolic");
+    play_btn.set_tooltip_text(Some("Oynat / Duraklat (Boşluk / videoya tıkla)"));
+    play_btn.add_css_class("flat");
+    play_btn.add_css_class("player-play-btn");
+
+    let back10_btn = gtk::Button::from_icon_name("seek-backward-10-symbolic");
+    back10_btn.set_tooltip_text(Some("10 sn geri (←)"));
+    back10_btn.add_css_class("flat");
+    back10_btn.add_css_class("player-center-btn");
+
+    let fwd10_btn = gtk::Button::from_icon_name("seek-forward-10-symbolic");
+    fwd10_btn.set_tooltip_text(Some("10 sn ileri (→)"));
+    fwd10_btn.add_css_class("flat");
+    fwd10_btn.add_css_class("player-center-btn");
+
+    let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1000.0, 1.0);
+    seek.add_css_class("pc-seek");
+    seek.set_hexpand(true);
+    seek.set_draw_value(false);
+    seek.set_tooltip_text(Some("İlerleme çubuğu — sürükle"));
+    let cur_lbl = gtk::Label::new(Some("--:--"));
+    let dur_lbl = gtk::Label::new(Some("--:--"));
+    cur_lbl.add_css_class("embed-time");
+    dur_lbl.add_css_class("embed-time");
+
+    // --- ses: SAĞDA, doğrudan tıklayarak/sürükleyerek ayarlanır (popover yok) ---
+    let vol_btn = gtk::Button::from_icon_name(vol_icon(start_volume, start_muted));
+    vol_btn.set_tooltip_text(Some("Sesi aç/kapat (M)"));
+    vol_btn.add_css_class("flat");
+    vol_btn.add_css_class("circular");
+    vol_btn.add_css_class("player-text");
+    vol_btn.add_css_class("player-vol-btn");
+    let vol_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
+    vol_scale.add_css_class("vol-scale");
+    vol_scale.set_value(start_volume);
+    vol_scale.set_draw_value(false);
+    vol_scale.set_size_request(70, -1);
+
+    let src_lbl = gtk::Label::new(None);
+
+    // --- oynatma hızı: küçük açılır menü ---
+    let speed_btn = gtk::MenuButton::builder()
+        .label("1.0x ▾")
+        .tooltip_text("Oynatma hızı")
+        .build();
+    speed_btn.add_css_class("pill-dropdown");
+    let speed_pop = gtk::Popover::builder()
+        .position(gtk::PositionType::Top)
+        .build();
+    speed_pop.add_css_class("quality-pop");
+    speed_btn.set_popover(Some(&speed_pop));
+    let speed_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    speed_box.set_margin_top(6);
+    speed_box.set_margin_bottom(6);
+    speed_pop.set_child(Some(&speed_box));
+
+    // --- kalite: SADECE kaynak/çözünürlük listesi, başka bir şey yok ---
+    let quality_btn = gtk::MenuButton::builder()
+        .label("1080p ▾")
+        .tooltip_text("Kalite / kaynak")
+        .build();
+    quality_btn.add_css_class("pill-dropdown");
+    let quality_pop = gtk::Popover::builder()
+        .position(gtk::PositionType::Top)
+        .build();
+    quality_pop.add_css_class("quality-pop");
+    quality_btn.set_popover(Some(&quality_pop));
+    let quality_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    quality_box.set_margin_top(6);
+    quality_box.set_margin_bottom(6);
+    quality_pop.set_child(Some(&quality_box));
+
+    // --- alt kontrol kümesi (scrim içinde, fare boşta kalınca gizlenir) ---
+    let bot_title = gtk::Label::new(Some(media_title));
+    bot_title.add_css_class("embed-bot-title");
+    bot_title.add_css_class("title-4");
+    bot_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    bot_title.set_xalign(0.0);
+    bot_title.set_hexpand(true);
+
+    // Seek üstünde ortada beliren hata/bilgi kapsülü (yalnızca gerektiğinde).
+    let status = gtk::Label::new(None);
+    status.add_css_class("info-capsule");
+    status.set_halign(gtk::Align::Center);
+    status.set_valign(gtk::Align::Center);
+    status.set_visible(false);
+
+    // Alt panel — 3 sıra (üst kısım · seek · alt kısım).
+    // Üst kısım: başlık (sol) · hız + kalite pill'leri (sağ).
+    let top_part = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    top_part.append(&bot_title);
+    top_part.append(&speed_btn);
+    top_part.append(&quality_btn);
+
+    // Orta kısım: tam genişlik ince seekbar; ortada beliren bilgi kapsülü.
+    let seek_row = gtk::Overlay::new();
+    seek_row.set_child(Some(&seek));
+    seek_row.add_overlay(&status);
+
+    // Alt kısım: geçen süre (sol) … ses ikonu + ses slider + toplam süre (sağ).
+    let bottom_part = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    bottom_part.append(&cur_lbl);
+    let time_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    time_spacer.set_hexpand(true);
+    bottom_part.append(&time_spacer);
+    bottom_part.append(&vol_btn);
+    bottom_part.append(&vol_scale);
+    bottom_part.append(&dur_lbl);
+
+    controls.append(&top_part);
+    controls.append(&seek_row);
+    controls.append(&bottom_part);
+
+    // ORTA taşıma kümesi: [−10][oynat/duraklat][+10] — ekranın tam ortasında.
+    let center_box = gtk::Box::new(gtk::Orientation::Horizontal, 24);
+    center_box.set_halign(gtk::Align::Center);
+    center_box.set_valign(gtk::Align::Center);
+    center_box.append(&back10_btn);
+    center_box.append(&play_btn);
+    center_box.append(&fwd10_btn);
+    let center_rev = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::Crossfade)
+        .transition_duration(220)
+        .child(&center_box)
+        .build();
+    center_rev.set_reveal_child(true);
+    center_rev.set_halign(gtk::Align::Center);
+    center_rev.set_valign(gtk::Align::Center);
+
+    // Z-sırası: orta küme → alt bar.
+    stage.add_overlay(&center_rev);
+
+    // alt bar revealer ile sahneye gömülür (oto-gizleme için)
+    let controls_revealer = gtk::Revealer::builder()
+        .transition_type(gtk::RevealerTransitionType::SlideUp)
+        .transition_duration(220)
+        .child(&controls)
+        .build();
+    controls_revealer.set_reveal_child(true);
+    controls_revealer.set_valign(gtk::Align::End);
+    controls_revealer.set_hexpand(true);
+    stage.add_overlay(&controls_revealer);
+
+    ControlBar {
+        controls,
+        controls_revealer,
+        center_rev,
+        play_btn,
+        back10_btn,
+        fwd10_btn,
+        seek,
+        cur_lbl,
+        dur_lbl,
+        vol_btn,
+        vol_scale,
+        src_lbl,
+        speed_btn,
+        speed_pop,
+        speed_box,
+        quality_btn,
+        quality_pop,
+        quality_box,
+        bot_title,
+        status,
+    }
+}
+
 /// Gömülü oynatıcı sayfa içeriğini kurar.
 /// `None` dönerse mpv başlatılamamıştır (çağıran toast bassın).
 pub fn build_embedded_player(
@@ -1360,156 +1568,28 @@ pub fn build_embedded_player(
     stage.set_child(Some(&gl_area));
 
     // alt kontrol barı (revealer içinde, fare boşta kalınca gizlenir)
-    let controls = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    controls.add_css_class("embed-controls");
-    controls.set_valign(gtk::Align::End);
-    controls.set_margin_start(16);
-    controls.set_margin_end(16);
-    controls.set_margin_bottom(12);
-
-    // --- orta kontroller: Kitsune mimarisi [−10][oynat/duraklat][+10] ---
-    let play_btn = gtk::Button::from_icon_name("media-playback-start-symbolic");
-    play_btn.set_tooltip_text(Some("Oynat / Duraklat (Boşluk / videoya tıkla)"));
-    play_btn.add_css_class("flat");
-    play_btn.add_css_class("player-play-btn");
-
-    let back10_btn = gtk::Button::from_icon_name("seek-backward-10-symbolic");
-    back10_btn.set_tooltip_text(Some("10 sn geri (←)"));
-    back10_btn.add_css_class("flat");
-    back10_btn.add_css_class("player-center-btn");
-
-    let fwd10_btn = gtk::Button::from_icon_name("seek-forward-10-symbolic");
-    fwd10_btn.set_tooltip_text(Some("10 sn ileri (→)"));
-    fwd10_btn.add_css_class("flat");
-    fwd10_btn.add_css_class("player-center-btn");
-
-    let seek = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1000.0, 1.0);
-    seek.add_css_class("pc-seek");
-    seek.set_hexpand(true);
-    seek.set_draw_value(false);
-    seek.set_tooltip_text(Some("İlerleme çubuğu — sürükle"));
-    let cur_lbl = gtk::Label::new(Some("--:--"));
-    let dur_lbl = gtk::Label::new(Some("--:--"));
-    cur_lbl.add_css_class("embed-time");
-    dur_lbl.add_css_class("embed-time");
-
-    // --- ses: SAĞDA, doğrudan tıklayarak/sürükleyerek ayarlanır (popover yok) ---
-    let vol_btn = gtk::Button::from_icon_name(vol_icon(start_volume, start_muted));
-    vol_btn.set_tooltip_text(Some("Sesi aç/kapat (M)"));
-    vol_btn.add_css_class("flat");
-    vol_btn.add_css_class("circular");
-    vol_btn.add_css_class("player-text");
-    vol_btn.add_css_class("player-vol-btn");
-    let vol_scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 100.0, 1.0);
-    vol_scale.add_css_class("vol-scale");
-    vol_scale.set_value(start_volume);
-    vol_scale.set_draw_value(false);
-    vol_scale.set_size_request(70, -1);
-
-    let src_lbl = gtk::Label::new(None);
-
-    // --- oynatma hızı: küçük açılır menü ---
-    let speed_btn = gtk::MenuButton::builder()
-        .label("1.0x ▾")
-        .tooltip_text("Oynatma hızı")
-        .build();
-    speed_btn.add_css_class("pill-dropdown");
-    let speed_pop = gtk::Popover::builder()
-        .position(gtk::PositionType::Top)
-        .build();
-    speed_pop.add_css_class("quality-pop");
-    speed_btn.set_popover(Some(&speed_pop));
-    let speed_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    speed_box.set_margin_top(6);
-    speed_box.set_margin_bottom(6);
-    speed_pop.set_child(Some(&speed_box));
-
-    // --- kalite: SADECE kaynak/çözünürlük listesi, başka bir şey yok ---
-    let quality_btn = gtk::MenuButton::builder()
-        .label("1080p ▾")
-        .tooltip_text("Kalite / kaynak")
-        .build();
-    quality_btn.add_css_class("pill-dropdown");
-    let quality_pop = gtk::Popover::builder()
-        .position(gtk::PositionType::Top)
-        .build();
-    quality_pop.add_css_class("quality-pop");
-    quality_btn.set_popover(Some(&quality_pop));
-    let quality_box = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    quality_box.set_margin_top(6);
-    quality_box.set_margin_bottom(6);
-    quality_pop.set_child(Some(&quality_box));
-
-    // --- alt kontrol kümesi (scrim içinde, fare boşta kalınca gizlenir) ---
-    let bot_title = gtk::Label::new(Some(&media_title));
-    bot_title.add_css_class("embed-bot-title");
-    bot_title.add_css_class("title-4");
-    bot_title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    bot_title.set_xalign(0.0);
-    bot_title.set_hexpand(true);
-
-    // Seek üstünde ortada beliren hata/bilgi kapsülü (yalnızca gerektiğinde).
-    let status = gtk::Label::new(None);
-    status.add_css_class("info-capsule");
-    status.set_halign(gtk::Align::Center);
-    status.set_valign(gtk::Align::Center);
-    status.set_visible(false);
-
-    // Alt panel — 3 sıra (üst kısım · seek · alt kısım).
-    // Üst kısım: başlık (sol) · hız + kalite pill'leri (sağ).
-    let top_part = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    top_part.append(&bot_title);
-    top_part.append(&speed_btn);
-    top_part.append(&quality_btn);
-
-    // Orta kısım: tam genişlik ince seekbar; ortada beliren bilgi kapsülü.
-    let seek_row = gtk::Overlay::new();
-    seek_row.set_child(Some(&seek));
-    seek_row.add_overlay(&status);
-
-    // Alt kısım: geçen süre (sol) … ses ikonu + ses slider + toplam süre (sağ).
-    let bottom_part = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    bottom_part.append(&cur_lbl);
-    let time_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    time_spacer.set_hexpand(true);
-    bottom_part.append(&time_spacer);
-    bottom_part.append(&vol_btn);
-    bottom_part.append(&vol_scale);
-    bottom_part.append(&dur_lbl);
-
-    controls.append(&top_part);
-    controls.append(&seek_row);
-    controls.append(&bottom_part);
-
-    // ORTA taşıma kümesi: [−10][oynat/duraklat][+10] — ekranın tam ortasında.
-    let center_box = gtk::Box::new(gtk::Orientation::Horizontal, 24);
-    center_box.set_halign(gtk::Align::Center);
-    center_box.set_valign(gtk::Align::Center);
-    center_box.append(&back10_btn);
-    center_box.append(&play_btn);
-    center_box.append(&fwd10_btn);
-    let center_rev = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::Crossfade)
-        .transition_duration(220)
-        .child(&center_box)
-        .build();
-    center_rev.set_reveal_child(true);
-    center_rev.set_halign(gtk::Align::Center);
-    center_rev.set_valign(gtk::Align::Center);
-
-    // Z-sırası: orta küme → alt bar.
-    stage.add_overlay(&center_rev);
-
-    // alt bar revealer ile sahneye gömülür (oto-gizleme için)
-    let controls_revealer = gtk::Revealer::builder()
-        .transition_type(gtk::RevealerTransitionType::SlideUp)
-        .transition_duration(220)
-        .child(&controls)
-        .build();
-    controls_revealer.set_reveal_child(true);
-    controls_revealer.set_valign(gtk::Align::End);
-    controls_revealer.set_hexpand(true);
-    stage.add_overlay(&controls_revealer);
+    let ControlBar {
+        controls,
+        controls_revealer,
+        center_rev,
+        play_btn,
+        back10_btn,
+        fwd10_btn,
+        seek,
+        cur_lbl,
+        dur_lbl,
+        vol_btn,
+        vol_scale,
+        src_lbl,
+        speed_btn,
+        speed_pop,
+        speed_box,
+        quality_btn,
+        quality_pop,
+        quality_box,
+        bot_title,
+        status,
+    } = build_control_bar(&stage, start_volume, start_muted, &media_title);
 
     // sağ altta beliren "İntroyu Atla" butonu
     let skip_btn = gtk::Button::new();
