@@ -7806,44 +7806,7 @@ impl App {
             // Uzak konumlar sayfa açıldıktan SONRA gelir; bulunan kaydı
             // haritaya yazıp görünür satırın çubuğunu/etiketini yerinde
             // tazele. Böylece detay beklemeden açılır, ilerleme sonradan gelir.
-            Msg::RemotePos(tid, remotes) => {
-                if remotes.is_empty() {
-                    return;
-                }
-                {
-                    let mut rp = self.remote_progress.borrow_mut();
-                    for (s, e, rpos) in &remotes {
-                        rp.insert(format!("{tid}:{s}:{e}"), (*rpos, 0.0));
-                    }
-                }
-                let bars = self.progress_bars.borrow();
-                for (s, e, rpos) in &remotes {
-                    let key = format!("{tid}:{s}:{e}");
-                    let Some((pb, lbl)) = bars.get(&key) else { continue };
-                    // Süre yalnızca yerel kayıtta biliniyor; uzakta değil.
-                    let dur = self
-                        .progress
-                        .borrow()
-                        .get(&key)
-                        .map(|(_, d)| *d)
-                        .unwrap_or(0.0);
-                    if dur <= 0.0 || *rpos <= 1.0 {
-                        continue;
-                    }
-                    pb.set_fraction((rpos / dur).clamp(0.0, 1.0));
-                    pb.set_visible(true);
-                    let fmt = |sec: f64| -> String {
-                        let t = sec as u64;
-                        if t >= 3600 {
-                            format!("{}:{:02}:{:02}", t / 3600, (t % 3600) / 60, t % 60)
-                        } else {
-                            format!("{}:{:02}", t / 60, t % 60)
-                        }
-                    };
-                    lbl.set_text(&format!("{} / {}", fmt(*rpos), fmt(dur)));
-                    lbl.set_visible(true);
-                }
-            }
+            Msg::RemotePos(tid, remotes) => self.on_remote_pos(tid, remotes),
             Msg::Play(title, ep, res) => match res {
                 Ok((fast, fast_embeds, fallback, remote)) => {
                     self.play_candidates(&title, &ep, &fast, &fast_embeds, &fallback, remote)
@@ -7875,76 +7838,8 @@ impl App {
                 }
                 Err(e) => self.show_error(&e),
             },
-            Msg::ServerHistory(res, reset) => {
-                match res {
-                    Ok((titles, total)) => {
-                        if reset {
-                            *self.server_history.borrow_mut() = titles;
-                            self.server_pool_pages.set(3);
-                            self.cont_page.set(0);
-                        } else {
-                            // Birleştir (gezinti tazeliği; havuz korunur).
-                            let mut cur = self.server_history.borrow_mut();
-                            for e in titles {
-                                if let Some(i) = cur.iter().position(|x| x.title.id == e.title.id) {
-                                    cur[i] = e;
-                                } else {
-                                    cur.push(e);
-                                }
-                            }
-                            cur.sort_by(|a, b| b.date.cmp(&a.date));
-                            drop(cur);
-                            self.server_pool_pages.set(self.server_pool_pages.get().max(3));
-                        }
-                        self.server_total.set(total);
-                    }
-                    Err(e) => {
-                        eprintln!("[AUTH] sunucu geçmişi alınamadı: {e}");
-                        // Bayrağı geri al, sonra tekrar denensin.
-                        self.server_history_loaded.set(false);
-                    }
-                }
-                let top = self.page_history.borrow().last().cloned();
-                if top == Some(Page::History) || top == Some(Page::Home) {
-                    self.show_page(&top.unwrap_or(Page::Home));
-                }
-            }
-            Msg::ServerMore(new_pool, res) => {
-                self.server_more_loading.set(false);
-                match res {
-                    Ok((items, total)) => {
-                        let mut cur = self.server_history.borrow_mut();
-                        for e in items {
-                            if let Some(i) = cur.iter().position(|x| x.title.id == e.title.id) {
-                                cur[i] = e;
-                            } else {
-                                cur.push(e);
-                            }
-                        }
-                        cur.sort_by(|a, b| b.date.cmp(&a.date));
-                        drop(cur);
-                        self.server_total.set(total);
-                        self.server_pool_pages.set(new_pool);
-                    }
-                    Err(e) => {
-                        eprintln!("[AUTH] devam havuzu büyütülemedi: {e}");
-                        // Bekleyen sayfa geçersiz kaldıysa son geçerliye dön.
-                        let pool = self.continue_items().len();
-                        let maxp = if pool == 0 { 0 } else { (pool - 1) / 10 };
-                        if self.cont_page.get() as usize > maxp {
-                            self.cont_page.set(maxp as u32);
-                        }
-                        self.show_error(&e);
-                    }
-                }
-                let top = self.page_history.borrow().last().cloned();
-                if top == Some(Page::Home) {
-                    self.show_page(&Page::Home);
-                    let saved = self.saved_scroll.get();
-                    self.saved_scroll.set(-1.0);
-                    self.restore_scroll_value(saved);
-                }
-            }
+            Msg::ServerHistory(res, reset) => self.on_server_history(res, reset),
+            Msg::ServerMore(new_pool, res) => self.on_server_more(new_pool, res),
             Msg::HistPage(page, res) => {
                 self.hist_loading.set(false);
                 match res {
@@ -8141,89 +8036,8 @@ impl App {
                     move || Msg::Play(title_c, ep_c, res)
                 });
             }
-            Msg::DlLists { title, quality, items, is_single } => {
-                let with_subs: Vec<(Episode, Vec<api::FansubInfo>)> = items
-                    .into_iter()
-                    .filter(|(_, l)| !l.is_empty())
-                    .collect();
-                if with_subs.is_empty() {
-                    let t = adw::Toast::new("Seçili bölümlerde çeviri bulunamadı");
-                    t.set_timeout(3);
-                    self.toast.add_toast(t);
-                    return;
-                }
-                if !self.settings.borrow().fansub_ask_each_time {
-                    let auto: Vec<(Episode, api::FansubInfo)> = with_subs
-                        .into_iter()
-                        .map(|(ep, mut l)| (ep, l.remove(0)))
-                        .collect();
-                    let title_c = title.clone();
-                    let quality_c = quality.clone();
-                    let this_c = self.clone_ref();
-                    let dir = this_c.effective_download_dir();
-                    let series = crate::download::sanitize_filename(&title_c.name);
-                    self.spawn(move |c| {
-                        let mut recs = Vec::new();
-                        let mut skipped = Vec::new();
-                        for (ep, fs) in &auto {
-                            match crate::download::resolve_for_download(
-                                &c, &dir, &series, title_c.id, ep, fs, &quality_c,
-                            ) {
-                                Ok(rec) => recs.push(rec),
-                                Err(e) => {
-                                    eprintln!("[DL] çözümleme atlandı: {e}");
-                                    skipped.push(format!(
-                                        "S{:02}E{:02}: {e}",
-                                        ep.season, ep.episode
-                                    ));
-                                }
-                            }
-                        }
-                        move || Msg::DlBatchResolved(recs, skipped, is_single)
-                    });
-                    return;
-                }
-                let quality_c = quality.clone();
-                let default_q = quality.clone();
-                let this_c = self.clone_ref();
-                let dir = this_c.effective_download_dir();
-                let series = crate::download::sanitize_filename(&title.name);
-                let title_id = title.id;
-                crate::ui::flashcard::show_flashcard_wizard(
-                    &self.window,
-                    &title,
-                    with_subs,
-                    &default_q,
-                    move |done| {
-                        if done.is_empty() {
-                            return;
-                        }
-                        let dir_c = dir.clone();
-                        let series_c = series.clone();
-                        let quality_cc = quality_c.clone();
-                        this_c.spawn(move |c| {
-                            let mut recs = Vec::new();
-                            let mut skipped = Vec::new();
-                            for (ep, fs, q) in &done {
-                                let q = q.as_deref().unwrap_or(&quality_cc);
-                                match crate::download::resolve_for_download(
-                                    &c, &dir_c, &series_c, title_id, ep, fs, q,
-                                ) {
-                                    Ok(rec) => recs.push(rec),
-                                    Err(e) => {
-                                        eprintln!("[DL] çözümleme atlandı: {e}");
-                                        skipped.push(format!(
-                                            "S{:02}E{:02}: {e}",
-                                            ep.season, ep.episode
-                                        ));
-                                    }
-                                }
-                            }
-                            move || Msg::DlBatchResolved(recs, skipped, is_single)
-                        });
-                    },
-                );
-            }
+            Msg::DlLists { title, quality, items, is_single } =>
+                self.on_dl_lists(title, quality, items, is_single),
             Msg::DlBatchResolved(recs, skipped, _is_single) => {
                 if !skipped.is_empty() {
                     let t = adw::Toast::new(&format!("{} indirme atlandı", skipped.len()));
@@ -8241,6 +8055,213 @@ impl App {
                 }
             }
         }
+    }
+
+    /// Uzak konumlar geldi: kayıtları haritaya yaz ve görünür satırların
+    /// ilerleme çubuğunu/etiketini yerinde tazele.
+    fn on_remote_pos(&self, tid: u64, remotes: Vec<(u64, u64, f64)>) {
+        if remotes.is_empty() {
+            return;
+        }
+        {
+            let mut rp = self.remote_progress.borrow_mut();
+            for (s, e, rpos) in &remotes {
+                rp.insert(format!("{tid}:{s}:{e}"), (*rpos, 0.0));
+            }
+        }
+        let bars = self.progress_bars.borrow();
+        for (s, e, rpos) in &remotes {
+            let key = format!("{tid}:{s}:{e}");
+            let Some((pb, lbl)) = bars.get(&key) else { continue };
+            // Süre yalnızca yerel kayıtta biliniyor; uzakta değil.
+            let dur = self
+                .progress
+                .borrow()
+                .get(&key)
+                .map(|(_, d)| *d)
+                .unwrap_or(0.0);
+            if dur <= 0.0 || *rpos <= 1.0 {
+                continue;
+            }
+            pb.set_fraction((rpos / dur).clamp(0.0, 1.0));
+            pb.set_visible(true);
+            let fmt = |sec: f64| -> String {
+                let t = sec as u64;
+                if t >= 3600 {
+                    format!("{}:{:02}:{:02}", t / 3600, (t % 3600) / 60, t % 60)
+                } else {
+                    format!("{}:{:02}", t / 60, t % 60)
+                }
+            };
+            lbl.set_text(&format!("{} / {}", fmt(*rpos), fmt(dur)));
+            lbl.set_visible(true);
+        }
+    }
+
+    /// Sunucu geçmişi yanıtı: listeyi güncelle (reset=sıfırdan) ve görünüyorsa tazele.
+    fn on_server_history(&self, res: Result<(Vec<api::ServerEntry>, usize), String>, reset: bool) {
+        match res {
+            Ok((titles, total)) => {
+                if reset {
+                    *self.server_history.borrow_mut() = titles;
+                    self.server_pool_pages.set(3);
+                    self.cont_page.set(0);
+                } else {
+                    // Birleştir (gezinti tazeliği; havuz korunur).
+                    let mut cur = self.server_history.borrow_mut();
+                    for e in titles {
+                        if let Some(i) = cur.iter().position(|x| x.title.id == e.title.id) {
+                            cur[i] = e;
+                        } else {
+                            cur.push(e);
+                        }
+                    }
+                    cur.sort_by(|a, b| b.date.cmp(&a.date));
+                    drop(cur);
+                    self.server_pool_pages.set(self.server_pool_pages.get().max(3));
+                }
+                self.server_total.set(total);
+            }
+            Err(e) => {
+                eprintln!("[AUTH] sunucu geçmişi alınamadı: {e}");
+                // Bayrağı geri al, sonra tekrar denensin.
+                self.server_history_loaded.set(false);
+            }
+        }
+        let top = self.page_history.borrow().last().cloned();
+        if top == Some(Page::History) || top == Some(Page::Home) {
+            self.show_page(&top.unwrap_or(Page::Home));
+        }
+    }
+
+    /// "Daha fazla" havuz yanıtı: kayıtları birleştir, hata halinde sayfayı geri al.
+    fn on_server_more(&self, new_pool: u32, res: Result<(Vec<api::ServerEntry>, usize), String>) {
+        self.server_more_loading.set(false);
+        match res {
+            Ok((items, total)) => {
+                let mut cur = self.server_history.borrow_mut();
+                for e in items {
+                    if let Some(i) = cur.iter().position(|x| x.title.id == e.title.id) {
+                        cur[i] = e;
+                    } else {
+                        cur.push(e);
+                    }
+                }
+                cur.sort_by(|a, b| b.date.cmp(&a.date));
+                drop(cur);
+                self.server_total.set(total);
+                self.server_pool_pages.set(new_pool);
+            }
+            Err(e) => {
+                eprintln!("[AUTH] devam havuzu büyütülemedi: {e}");
+                // Bekleyen sayfa geçersiz kaldıysa son geçerliye dön.
+                let pool = self.continue_items().len();
+                let maxp = if pool == 0 { 0 } else { (pool - 1) / 10 };
+                if self.cont_page.get() as usize > maxp {
+                    self.cont_page.set(maxp as u32);
+                }
+                self.show_error(&e);
+            }
+        }
+        let top = self.page_history.borrow().last().cloned();
+        if top == Some(Page::Home) {
+            self.show_page(&Page::Home);
+            let saved = self.saved_scroll.get();
+            self.saved_scroll.set(-1.0);
+            self.restore_scroll_value(saved);
+        }
+    }
+
+    /// Çevirmen listeleri geldi: ya otomatik ilk çeviriyle indirmeyi başlat
+    /// ya da kullanıcıya flashcard sihirbazını göster.
+    fn on_dl_lists(
+        &self,
+        title: Title,
+        quality: String,
+        items: Vec<(Episode, Vec<api::FansubInfo>)>,
+        is_single: bool,
+    ) {
+        let with_subs: Vec<(Episode, Vec<api::FansubInfo>)> = items
+            .into_iter()
+            .filter(|(_, l)| !l.is_empty())
+            .collect();
+        if with_subs.is_empty() {
+            let t = adw::Toast::new("Seçili bölümlerde çeviri bulunamadı");
+            t.set_timeout(3);
+            self.toast.add_toast(t);
+            return;
+        }
+        if !self.settings.borrow().fansub_ask_each_time {
+            let auto: Vec<(Episode, api::FansubInfo)> = with_subs
+                .into_iter()
+                .map(|(ep, mut l)| (ep, l.remove(0)))
+                .collect();
+            let title_c = title.clone();
+            let quality_c = quality.clone();
+            let this_c = self.clone_ref();
+            let dir = this_c.effective_download_dir();
+            let series = crate::download::sanitize_filename(&title_c.name);
+            self.spawn(move |c| {
+                let mut recs = Vec::new();
+                let mut skipped = Vec::new();
+                for (ep, fs) in &auto {
+                    match crate::download::resolve_for_download(
+                        &c, &dir, &series, title_c.id, ep, fs, &quality_c,
+                    ) {
+                        Ok(rec) => recs.push(rec),
+                        Err(e) => {
+                            eprintln!("[DL] çözümleme atlandı: {e}");
+                            skipped.push(format!(
+                                "S{:02}E{:02}: {e}",
+                                ep.season, ep.episode
+                            ));
+                        }
+                    }
+                }
+                move || Msg::DlBatchResolved(recs, skipped, is_single)
+            });
+            return;
+        }
+        let quality_c = quality.clone();
+        let default_q = quality.clone();
+        let this_c = self.clone_ref();
+        let dir = this_c.effective_download_dir();
+        let series = crate::download::sanitize_filename(&title.name);
+        let title_id = title.id;
+        crate::ui::flashcard::show_flashcard_wizard(
+            &self.window,
+            &title,
+            with_subs,
+            &default_q,
+            move |done| {
+                if done.is_empty() {
+                    return;
+                }
+                let dir_c = dir.clone();
+                let series_c = series.clone();
+                let quality_cc = quality_c.clone();
+                this_c.spawn(move |c| {
+                    let mut recs = Vec::new();
+                    let mut skipped = Vec::new();
+                    for (ep, fs, q) in &done {
+                        let q = q.as_deref().unwrap_or(&quality_cc);
+                        match crate::download::resolve_for_download(
+                            &c, &dir_c, &series_c, title_id, ep, fs, q,
+                        ) {
+                            Ok(rec) => recs.push(rec),
+                            Err(e) => {
+                                eprintln!("[DL] çözümleme atlandı: {e}");
+                                skipped.push(format!(
+                                    "S{:02}E{:02}: {e}",
+                                    ep.season, ep.episode
+                                ));
+                            }
+                        }
+                    }
+                    move || Msg::DlBatchResolved(recs, skipped, is_single)
+                });
+            },
+        );
     }
 
     pub fn open_episodes(&self, title: Title) {
