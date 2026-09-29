@@ -47,6 +47,7 @@ pub fn poster_card(
     let overlay = gtk::Overlay::new();
     overlay.add_css_class("poster-lift");
     overlay.set_size_request(140, 210);
+    overlay.set_halign(gtk::Align::Center);
     let pic = crate::covers::new_sized_picture(140, 210);
     pic.set_halign(gtk::Align::Center);
     pic.set_can_shrink(false);
@@ -64,8 +65,8 @@ pub fn poster_card(
         b.set_size_request(34, 34);
         b.set_halign(gtk::Align::Start);
         b.set_valign(gtk::Align::Start);
-        b.set_margin_top(6);
-        b.set_margin_start(6);
+        b.set_margin_top(10);
+        b.set_margin_start(10);
         b.set_visible(false);
         b.set_tooltip_text(Some(if member {
             "Maratonda (çıkarmak için tıkla)"
@@ -104,7 +105,8 @@ pub fn poster_card(
     name.add_css_class("card-title");
     name.set_wrap(false);
     name.set_single_line_mode(true);
-    name.set_max_width_chars(16);
+    name.set_max_width_chars(13);
+    name.set_size_request(138, -1);
     name.set_lines(1);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     card.append(&name);
@@ -118,7 +120,8 @@ pub fn poster_card(
     sub_lbl.set_wrap(false);
     sub_lbl.set_single_line_mode(true);
     sub_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    sub_lbl.set_max_width_chars(18);
+    sub_lbl.set_max_width_chars(13);
+    sub_lbl.set_size_request(138, -1);
     card.append(&sub_lbl);
 
     // Hover'da maraton butonunu göster/gizle.

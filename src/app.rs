@@ -2538,7 +2538,7 @@ impl App {
         let card = gtk::Box::new(gtk::Orientation::Vertical, 4);
         card.add_css_class("title-btn");
         card.set_size_request(140, 270);
-        card.set_halign(gtk::Align::Fill);
+        card.set_halign(gtk::Align::Center);
         card.set_valign(gtk::Align::Start);
         let pic = self.covers.cover_picture(t.poster.as_deref(), 140, 210);
         // std_poster_card ile aynı: ortala + kırpma yok, köşe yuvarlaklığı
@@ -2548,6 +2548,7 @@ impl App {
         let overlay = gtk::Overlay::new();
         overlay.add_css_class("poster-lift");
         overlay.set_size_request(140, 210);
+        overlay.set_halign(gtk::Align::Center);
         overlay.set_child(Some(&pic));
         let play_btn: Option<gtk::Button> = ep.map(|e| {
             let b = gtk::Button::from_icon_name("media-playback-start-symbolic");
@@ -2579,8 +2580,8 @@ impl App {
             b.set_size_request(34, 34);
             b.set_halign(gtk::Align::Start);
             b.set_valign(gtk::Align::Start);
-            b.set_margin_top(6);
-            b.set_margin_start(12);
+            b.set_margin_top(10);
+            b.set_margin_start(10);
             b.set_visible(true); // her zaman görünür
             b.set_tooltip_text(Some(if member {
                 "Maratonda (çıkarmak için tıkla)"
@@ -2609,7 +2610,7 @@ impl App {
         name.set_single_line_mode(true);
         name.set_justify(gtk::Justification::Center);
         name.set_xalign(0.5);
-        name.set_max_width_chars(16);
+        name.set_max_width_chars(13);
         // Kart 140px; etiket doğal genişliği aşarsa `column_homogeneous`
         // sütunları genişletip araya boşluk bırakıyor. Sabitle.
         name.set_size_request(138, -1);
@@ -2637,7 +2638,7 @@ impl App {
         meta.set_wrap(false);
         meta.set_single_line_mode(true);
         meta.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        meta.set_max_width_chars(18);
+        meta.set_max_width_chars(13);
         meta.set_size_request(138, -1);
         card.append(&meta);
         // Hover'da sadece play butonunu göster/gizle, posteri hafif kaldır.
