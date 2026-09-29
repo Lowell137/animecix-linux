@@ -7721,34 +7721,7 @@ impl App {
                     eprintln!("[MANGA/GEÇMİŞ] HATA (sessiz geçiliyor): {e}");
                 }
             },
-            Msg::MangaHome(res) => match res {
-                Ok(eps) => {
-                    eprintln!("[MANGA] {} son bölüm", eps.len());
-                    *self.manga_rail.borrow_mut() = eps;
-                    let vis = self
-                        .stack
-                        .visible_child_name()
-                        .map(|n| n.to_string())
-                        .unwrap_or_else(|| "<yok>".into());
-                    eprintln!(
-                        "[MANGA] görünür sayfa = {vis:?}, rayda {} kayıt",
-                        self.manga_rail.borrow().len()
-                    );
-                    // Geçmişe bakma: mod düğmesi show_page çağırıyor ama
-                    // history'ye eklemiyor. Görünür yığın çocuğuna bakalım.
-                    if self
-                        .stack
-                        .visible_child_name()
-                        .is_some_and(|n| n == "manga_home")
-                    {
-                        self.show_page(&Page::MangaHome);
-                    }
-                }
-                Err(e) => {
-                    eprintln!("[MANGA] HATA: {e}");
-                    self.show_error(&e)
-                }
-            },
+            Msg::MangaHome(res) => self.on_manga_home(res),
             Msg::Cats(res) => match res {
                 Ok(cats) => {
                     *self.cats.borrow_mut() = cats;
@@ -7777,32 +7750,7 @@ impl App {
                 }
                 Err(e) => self.show_error(&e),
             },
-            Msg::Eps(title, res, remotes) => {
-                // Diskteki güncel ilerlemeyi al (oynatıcı yazmış olabilir).
-                *self.progress.borrow_mut() = self.client.load_state().progress;
-                // Uzak konumları ayrı haritada tut (görünüm için; diske yazılmaz).
-                if !remotes.is_empty() {
-                    let mut rp = self.remote_progress.borrow_mut();
-                    for (s, e, rpos) in remotes {
-                        rp.insert(format!("{}:{s}:{e}", title.id), (rpos, 0.0));
-                    }
-                }
-                match res {
-                    Ok(eps) => {
-                        let page = if eps.is_empty() {
-                            Page::Movie { title, eps }
-                        } else {
-                            match title.title_type.as_deref() {
-                                Some("movie") => Page::Movie { title, eps },
-                                _ => Page::Episodes { title, eps },
-                            }
-                        };
-                        self.page_history.borrow_mut().push(page.clone());
-                        self.show_page(&page);
-                    }
-                    Err(e) => self.show_error(&e),
-                }
-            }
+            Msg::Eps(title, res, remotes) => self.on_eps(title, res, remotes),
             // Uzak konumlar sayfa açıldıktan SONRA gelir; bulunan kaydı
             // haritaya yazıp görünür satırın çubuğunu/etiketini yerinde
             // tazele. Böylece detay beklemeden açılır, ilerleme sonradan gelir.
@@ -7813,66 +7761,10 @@ impl App {
                 }
                 Err(e) => self.show_error(&e),
             },
-            Msg::Login(res) => match res {
-                Ok((u, n_fav)) => {
-                    let msg = if n_fav > 0 {
-                        format!("Hoş geldin, {}! (siteden {n_fav} favori alındı)", u.name)
-                    } else {
-                        format!("Hoş geldin, {}!", u.name)
-                    };
-                    let t = adw::Toast::new(&msg);
-                    t.set_timeout(4);
-                    self.toast.add_toast(t);
-                    // Girişle birlikte sunucu geçmişini de çek.
-                    self.fetch_server_history(true);
-                    *self.hist_items.borrow_mut() = Vec::new();
-                    self.hist_total.set(0);
-                    self.hist_fetched.set(0);
-                    self.hist_loading.set(false);
-                    *self.sidebar_avatar_cache.borrow_mut() = None;
-                    self.update_sidebar_avatar();
-                    let top = self.page_history.borrow().last().cloned();
-                    if top == Some(Page::Account) || top == Some(Page::Favs) {
-                        self.show_page(&top.unwrap_or(Page::Account));
-                    }
-                }
-                Err(e) => self.show_error(&e),
-            },
+            Msg::Login(res) => self.on_login(res),
             Msg::ServerHistory(res, reset) => self.on_server_history(res, reset),
             Msg::ServerMore(new_pool, res) => self.on_server_more(new_pool, res),
-            Msg::HistPage(page, res) => {
-                self.hist_loading.set(false);
-                match res {
-                    Ok((items, total)) => {
-                        // Birleştir: id'ye göre upsert (yenisi kazanır),
-                        // tarih-azalan sırala. Eski yanıtlar zararsızdır.
-                        let mut cur = self.hist_items.borrow_mut();
-                        for e in items {
-                            if let Some(i) = cur.iter().position(|x| x.title.id == e.title.id) {
-                                cur[i] = e;
-                            } else {
-                                cur.push(e);
-                            }
-                        }
-                        cur.sort_by(|a, b| b.date.cmp(&a.date));
-                        drop(cur);
-                        self.hist_total.set(total);
-                        self.hist_fetched.set(self.hist_fetched.get().max(page + 1));
-                        *self.hist_error.borrow_mut() = None;
-                    }
-                    Err(e) => {
-                        eprintln!("[AUTH] geçmiş sayfa {page} alınamadı: {e}");
-                        // Hata varken otomatik tekrar deneme (sonsuz döngü
-                        // olmasın); kullanıcı "Tekrar Dene"ye basar.
-                        *self.hist_error.borrow_mut() = Some(e.clone());
-                        self.show_error(&e);
-                    }
-                }
-                let top = self.page_history.borrow().last().cloned();
-                if top == Some(Page::History) {
-                    self.show_page(&Page::History);
-                }
-            }
+            Msg::HistPage(page, res) => self.on_hist_page(page, res),
             Msg::NewsPage(page, res) => {
                 self.news_loading.set(false);
                 match res {
@@ -7968,34 +7860,7 @@ impl App {
                     self.show_page(&top.unwrap_or(Page::Home));
                 }
             }
-            Msg::RevPage(tid, page, res) => {
-                self.rev_loading.set(false);
-                if self.rev_title.get() != tid {
-                    return;
-                }
-                match res {
-                    Ok((items, total, last)) => {
-                        if page <= 1 {
-                            *self.rev_items.borrow_mut() = items;
-                        } else {
-                            self.rev_items.borrow_mut().extend(items);
-                        }
-                        self.rev_page.set(page);
-                        self.rev_total.set(total);
-                        self.rev_last.set(last);
-                        *self.rev_error.borrow_mut() = None;
-                    }
-                    Err(e) => {
-                        eprintln!("[REV] sayfa {page} alınamadı: {e}");
-                        *self.rev_error.borrow_mut() = Some(e.clone());
-                        self.show_error(&e);
-                    }
-                }
-                let top = self.page_history.borrow().last().cloned();
-                if matches!(top, Some(Page::Reviews { .. })) {
-                    self.show_page(&top.unwrap_or(Page::Home));
-                }
-            }
+            Msg::RevPage(tid, page, res) => self.on_rev_page(tid, page, res),
             Msg::LastRail(res) => {
                 if let Ok((items, _, _)) = res {
                     *self.last_rail.borrow_mut() = items;
@@ -8262,6 +8127,160 @@ impl App {
                 });
             },
         );
+    }
+
+    /// Manga ana sayfa son bölümler şeridi yanıtı: rayı güncelle ve görünüyorsa sayfayı tazele.
+    fn on_manga_home(&self, res: Result<Vec<LastEpisode>, String>) {
+        match res {
+        Ok(eps) => {
+            eprintln!("[MANGA] {} son bölüm", eps.len());
+            *self.manga_rail.borrow_mut() = eps;
+            let vis = self
+                .stack
+                .visible_child_name()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "<yok>".into());
+            eprintln!(
+                "[MANGA] görünür sayfa = {vis:?}, rayda {} kayıt",
+                self.manga_rail.borrow().len()
+            );
+            // Geçmişe bakma: mod düğmesi show_page çağırıyor ama
+            // history'ye eklemiyor. Görünür yığın çocuğuna bakalım.
+            if self
+                .stack
+                .visible_child_name()
+                .is_some_and(|n| n == "manga_home")
+            {
+                self.show_page(&Page::MangaHome);
+            }
+        }
+        Err(e) => {
+            eprintln!("[MANGA] HATA: {e}");
+            self.show_error(&e)
+        }
+        }
+    }
+
+    /// Başlığın bölümleri ve uzak izleme konumları geldi: ilerlemeyi güncelle ve ilgili sayfayı aç.
+    fn on_eps(&self, title: Title, res: Result<Vec<Episode>, String>, remotes: Vec<(u64, u64, f64)>) {
+        // Diskteki güncel ilerlemeyi al (oynatıcı yazmış olabilir).
+        *self.progress.borrow_mut() = self.client.load_state().progress;
+        // Uzak konumları ayrı haritada tut (görünüm için; diske yazılmaz).
+        if !remotes.is_empty() {
+            let mut rp = self.remote_progress.borrow_mut();
+            for (s, e, rpos) in remotes {
+                rp.insert(format!("{}:{s}:{e}", title.id), (rpos, 0.0));
+            }
+        }
+        match res {
+            Ok(eps) => {
+                let page = if eps.is_empty() {
+                    Page::Movie { title, eps }
+                } else {
+                    match title.title_type.as_deref() {
+                        Some("movie") => Page::Movie { title, eps },
+                        _ => Page::Episodes { title, eps },
+                    }
+                };
+                self.page_history.borrow_mut().push(page.clone());
+                self.show_page(&page);
+            }
+            Err(e) => self.show_error(&e),
+        }
+    }
+
+    /// Giriş yapma yanıtı: karşılama bildirimi, geçmiş ve profil durumunu güncelle.
+    fn on_login(&self, res: Result<(crate::auth::User, usize), String>) {
+        match res {
+        Ok((u, n_fav)) => {
+            let msg = if n_fav > 0 {
+                format!("Hoş geldin, {}! (siteden {n_fav} favori alındı)", u.name)
+            } else {
+                format!("Hoş geldin, {}!", u.name)
+            };
+            let t = adw::Toast::new(&msg);
+            t.set_timeout(4);
+            self.toast.add_toast(t);
+            // Girişle birlikte sunucu geçmişini de çek.
+            self.fetch_server_history(true);
+            *self.hist_items.borrow_mut() = Vec::new();
+            self.hist_total.set(0);
+            self.hist_fetched.set(0);
+            self.hist_loading.set(false);
+            *self.sidebar_avatar_cache.borrow_mut() = None;
+            self.update_sidebar_avatar();
+            let top = self.page_history.borrow().last().cloned();
+            if top == Some(Page::Account) || top == Some(Page::Favs) {
+                self.show_page(&top.unwrap_or(Page::Account));
+            }
+        }
+        Err(e) => self.show_error(&e),
+        }
+    }
+
+    /// Sayfalı sunucu geçmişi yanıtı: kayıtları birleştir ve görünüyorsa sayfayı tazele.
+    fn on_hist_page(&self, page: u32, res: Result<(Vec<api::ServerEntry>, usize), String>) {
+        self.hist_loading.set(false);
+        match res {
+            Ok((items, total)) => {
+                // Birleştir: id'ye göre upsert (yenisi kazanır),
+                // tarih-azalan sırala. Eski yanıtlar zararsızdır.
+                let mut cur = self.hist_items.borrow_mut();
+                for e in items {
+                    if let Some(i) = cur.iter().position(|x| x.title.id == e.title.id) {
+                        cur[i] = e;
+                    } else {
+                        cur.push(e);
+                    }
+                }
+                cur.sort_by(|a, b| b.date.cmp(&a.date));
+                drop(cur);
+                self.hist_total.set(total);
+                self.hist_fetched.set(self.hist_fetched.get().max(page + 1));
+                *self.hist_error.borrow_mut() = None;
+            }
+            Err(e) => {
+                eprintln!("[AUTH] geçmiş sayfa {page} alınamadı: {e}");
+                // Hata varken otomatik tekrar deneme (sonsuz döngü
+                // olmasın); kullanıcı "Tekrar Dene"ye basar.
+                *self.hist_error.borrow_mut() = Some(e.clone());
+                self.show_error(&e);
+            }
+        }
+        let top = self.page_history.borrow().last().cloned();
+        if top == Some(Page::History) {
+            self.show_page(&Page::History);
+        }
+    }
+
+    /// İncelemeler sayfa yanıtı: kayıtları birleştir veya sıfırla, hata durumunu kaydet.
+    fn on_rev_page(&self, tid: u64, page: u32, res: Result<(Vec<Review>, usize, u32), String>) {
+        self.rev_loading.set(false);
+        if self.rev_title.get() != tid {
+            return;
+        }
+        match res {
+            Ok((items, total, last)) => {
+                if page <= 1 {
+                    *self.rev_items.borrow_mut() = items;
+                } else {
+                    self.rev_items.borrow_mut().extend(items);
+                }
+                self.rev_page.set(page);
+                self.rev_total.set(total);
+                self.rev_last.set(last);
+                *self.rev_error.borrow_mut() = None;
+            }
+            Err(e) => {
+                eprintln!("[REV] sayfa {page} alınamadı: {e}");
+                *self.rev_error.borrow_mut() = Some(e.clone());
+                self.show_error(&e);
+            }
+        }
+        let top = self.page_history.borrow().last().cloned();
+        if matches!(top, Some(Page::Reviews { .. })) {
+            self.show_page(&top.unwrap_or(Page::Home));
+        }
     }
 
     pub fn open_episodes(&self, title: Title) {
