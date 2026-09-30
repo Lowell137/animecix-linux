@@ -115,6 +115,10 @@ publish_release() {
 # 1. Release derlemesi
 echo "==> cargo build --release çalıştırılıyor (v$VERSION)..."
 cargo build --release
+# CARGO_TARGET_DIR başka bir yere (örn. sandbox) ayarlandıysa binary oraya
+# düşer. `target/release` yolunu varsaymak eski binary'yi paketlerdi —
+# 1.3.5 oturumunda tam olarak bu oldu.
+BIN_SRC="${CARGO_TARGET_DIR:-$SCRIPT_DIR/target}/release/animecix"
 
 # 2. appimagetool kontrolü ve indirme
 APPIMAGETOOL=""
@@ -144,9 +148,16 @@ mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "$APPDIR/usr/share/animecix/assets"
 
 # 4. Binary ve ikon/asset'leri kopyala
-cp target/release/animecix "$APPDIR/usr/bin/animecix"
+cp "$BIN_SRC" "$APPDIR/usr/bin/animecix"
+if [ ! -s "$APPDIR/usr/bin/animecix" ]; then
+    echo "HATA: $BIN_SRC yok veya boş — paketleme iptal." >&2
+    exit 1
+fi
+echo "==> Paketlenen binary: $BIN_SRC ($(stat -c %y "$BIN_SRC"))"
 if [ -d "assets" ]; then
-    cp -r assets/* "$APPDIR/usr/share/animecix/assets/"
+    # Gizli dosyalar (.mcp.json, .DS_Store vb.) pakete girmesin; cp -r bunları
+    # kopyalıyor ve izinli olmayan bir tanesi tüm adımı kesiyordu.
+    tar -C assets --exclude='.*' -cf - . | tar -C "$APPDIR/usr/share/animecix/assets" -xf -
 fi
 
 ICON_SRC="assets/hicolor/256x256/apps/tr.com.animecix.png"

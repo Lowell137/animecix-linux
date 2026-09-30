@@ -135,6 +135,49 @@ fn err_msg(v: &serde_json::Value) -> String {
         .to_string()
 }
 
+/// MangaCiX geçmiş kaydındaki son okunan bölümü çözer.
+///
+/// Web `put-title` gövdesinde ilerleme `episodes[0]` içindedir. Eski/anime
+/// şekli `videos[0].episode_num` kullanabilir; o yalnız fallback'tir.
+fn manga_history_entry(r: &serde_json::Value) -> Option<crate::api::MangaHistory> {
+    let mut title = crate::api::Title::from_value_lenient(r)?;
+    let chapter_number = r["episodes"]
+        .as_array()
+        .and_then(|a| a.first())
+        .and_then(|e| e["episode_number"].as_f64())
+        .or_else(|| {
+            r["videos"]
+                .as_array()
+                .and_then(|a| a.first())
+                .and_then(|v| v["episode_num"].as_f64())
+        })
+        .filter(|n| n.is_finite() && *n > 0.0)
+        .unwrap_or(0.0);
+    if title.title_type.is_none() {
+        title.title_type = Some("manga".into());
+    }
+    let chapter_label = if chapter_number > 0.0 {
+        let number = chapter_number
+            .to_string()
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string();
+        format!("{number}. Bölüm")
+    } else {
+        String::new()
+    };
+    Some(crate::api::MangaHistory {
+        name: title.name.clone(),
+        poster: title.poster.clone(),
+        chapter_label,
+        chapter_idx: 0,
+        chapter_number,
+        page: 0,
+        ts: r["date"].as_u64().unwrap_or(0),
+        title,
+    })
+}
+
 impl Client {
     /// Kayıtlı oturum varsa döner.
     pub fn session_user(&self) -> Option<User> {
@@ -143,6 +186,21 @@ impl Client {
 
     pub fn is_logged_in(&self) -> bool {
         self.session_user().is_some()
+    }
+
+    /// Sunucu oturumu reddettiğinde (401) çağrılır.
+    ///
+    /// `session.json`daki `connect.sid` sunucu tarafında geçersizleşirse
+    /// `is_logged_in()` yine de true döner — dosyada `user` doludur. O
+    /// durumda hem geçmiş boş gelir hem de `put-title` sessizce
+    /// `success:true` dönüp hiçbir kayıt açmaz. Ölü oturumu kullanıcıya
+    /// görünür kılmak için burada oturum düşürülür.
+    fn on_unauthorized(&self, what: &str) {
+        eprintln!("[AUTH] {what} → 401: oturum geçersiz, yeniden giriş gerekiyor");
+        if let Ok(mut s) = self.session.lock() {
+            s.user = None;
+            s.save();
+        }
     }
 
     /// E-posta + şifre ile giriş. Başarılıysa oturumu saklar.
@@ -386,6 +444,83 @@ impl Client {
         }
     }
 
+    /// MangaCiX sunucusuna okuma kaydı işler (okuyucu açılışında, sessiz).
+    /// Yeni geçmiş satırı web istemcisiyle aynı `episodes: [tam bölüm]`
+    /// şemasıyla açılır; ayrı bir create ucu yoktur.
+    pub fn manga_put_title(
+        &self,
+        title: &crate::api::Title,
+        chapter: &crate::api::MangaChapter,
+    ) {
+        if let Err(e) = self.try_manga_put_title(title, chapter) {
+            eprintln!("[MANGA] kayıt gönderilemedi: {e}");
+        }
+    }
+
+    /// `put-title`'ı gönderir ve yanıtın gerçekten create/upsert olduğunu
+    /// doğrular. API bazı başlıklarda HTTP 200 + `success: true` dönerken
+    /// görünür geçmişe kayıt açmayabilir; 2xx'i tek başına başarı saymak bu
+    /// durumu gizliyordu.
+    fn try_manga_put_title(
+        &self,
+        title: &crate::api::Title,
+        chapter: &crate::api::MangaChapter,
+    ) -> Result<(), String> {
+        if !self.is_logged_in() {
+            return Ok(());
+        }
+        let (cookie, xsrf) = match self.session.lock() {
+            Ok(s) => (s.cookie_header(), s.xsrf().unwrap_or_default()),
+            Err(e) => return Err(e.to_string()),
+        };
+        let date = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let body = crate::api::Client::manga_history_put_body(title, chapter, date);
+        // MangaCiX'in bütün oturumlu uçları X-E-H imzası istiyor (imzasız
+        // GET 0 sonuç döndürüyor — ölçüldü). Web interceptor'ı da put-title
+        // dahil her isteği imzalıyor; çıplak POST create'i sessizce
+        // reddettirebilir. Sorgu dizesi yok → "" imzalanır.
+        let sig = crate::xeh::sign_query("").map_err(|e| e)?;
+        let resp = self
+            .http
+            .post(format!(
+                "{}/secure/history/put-title",
+                crate::api::MANGA_BASE
+            ))
+            .header("Cookie", &cookie)
+            .header("X-XSRF-TOKEN", &xsrf)
+            .header("X-Requested-With", "XMLHttpRequest")
+            .header("Accept", "application/json")
+            .header("Referer", "https://mangacix.net/")
+            .header("Origin", "https://mangacix.net")
+            .header("X-E-H", &sig)
+            .json(&body)
+            .timeout(15)
+            .send()?;
+        let st = resp.status();
+        if st == 401 {
+            self.on_unauthorized("manga put-title");
+            return Err("Oturumun sona ermiş — MangaCiX'e kaydetmek için tekrar giriş yap".into());
+        }
+        let body = resp.text()?;
+        let v: serde_json::Value = serde_json::from_str(&body).unwrap_or_default();
+        if !(200..300).contains(&st) || v["success"] != serde_json::Value::Bool(true) {
+            return Err(format!("HTTP {st}: {}", &body[..body.len().min(400)]));
+        }
+
+        // Kaydın gerçekten listenin üstünde olmasını bekle. Aynı title id
+        // zaten varsa `date` güncellenir; yeni başlıkta id görünmelidir.
+        let history = self.manga_history(10).map_err(|e| e)?;
+        if !history.iter().any(|m| m.title.id == title.id) {
+            return Err("API success:true döndü ama kayıt görünür geçmişe eklenmedi".into());
+        }
+        eprintln!("[MANGA] kayıt TAMAM (HTTP {st}, başlık {})", title.name);
+        Ok(())
+    }
+
+
     /// Sunucu geçmişi TEK sayfa (0-indexli, tarih-azalan).
     /// Şema: GET secure/history/get-titles?page=N → {data: {totalData, totalCount}}.
     /// Her kayıt: tam title objesi + `date` (ms) + son bölümün
@@ -522,7 +657,9 @@ impl Client {
                 .timeout(20)
                 .send();
             // Geçici bağlantı dalgalanması kullanıcıya hata olarak
-            // gösterilmemeli; manga geçmişi kritik değil.
+            // gösterilmemeli; manga geçmişi kritik değil. 401 ise farklı:
+            // oturumun öldüğü anlamına gelir ve yutulursa kullanıcı boş
+            // listeyi "geçmişim yok" sanır.
             let resp = match resp {
                 Ok(r) => r,
                 Err(e) => {
@@ -530,6 +667,10 @@ impl Client {
                     return Ok(out);
                 }
             };
+            if resp.status() == 401 {
+                self.on_unauthorized("manga geçmişi");
+                return Err("Oturumun sona ermiş — MangaCiX geçmişi için tekrar giriş yap".into());
+            }
             let v: serde_json::Value = match resp.json() {
                 Ok(v) => v,
                 Err(e) => {
@@ -539,25 +680,43 @@ impl Client {
             };
             let Some(arr) = v["data"]["totalData"].as_array() else { break };
             for r in arr {
-                if !MANGA.contains(&r["title_type"].as_str().unwrap_or("")) {
+                // MangaCiX geçmiş kayıtlarında `title_type` BOŞ geliyor
+                // (bkz. `manga_kayitlari_baslik_olmaz` testi). Bu yüzden
+                // `from_value` (anime|movie filtresi) kullanılırsa HER kayıt
+                // düşüyor ve sunucudan hiçbir şey gelmiyordu.
+                let tt = r["title_type"].as_str().unwrap_or("");
+                let genres: Vec<String> = r["genres"].as_array().map(|a| {
+                    a.iter()
+                        .filter_map(|g| {
+                            g.as_str()
+                                .map(|s| s.to_string())
+                                .or_else(|| {
+                                    g["display_name"]
+                                        .as_str()
+                                        .or_else(|| g["name"].as_str())
+                                        .map(|s| s.to_string())
+                                })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+                // Tür boşsa ya da manga türlerindendirse kabul et.
+                let is_manga = tt.is_empty() || MANGA.contains(&tt);
+                // `genres` yalnız yardımcı işarettir; MangaCiX başlıklarında
+                // tür alanı boş/geçersiz gelebilir. Tür dışı bir kayıt
+                // kendi endpoint'inden gelmeyeceği için tür kontrolü
+                // gevşek tutulur.
+                let genre_ok = genres.iter().any(|g| {
+                    let lower = g.to_lowercase();
+                    MANGA.iter().any(|m| *m == lower)
+                });
+                if !is_manga && !genre_ok {
                     continue;
                 }
-                let Some(title) = crate::api::Title::from_value(r) else { continue };
-                let episode = r["videos"]
-                    .as_array()
-                    .and_then(|a| a.first())
-                    .and_then(|v| v["episode_num"].as_u64())
-                    .unwrap_or(0);
-                out.push(crate::api::MangaHistory {
-                    name: title.name.clone(),
-                    poster: title.poster.clone(),
-                    chapter_label: if episode > 0 {
-                        format!("{episode}. Bölüm")
-                    } else {
-                        String::new()
-                    },
-                    title,
-                });
+                let Some(entry) = manga_history_entry(r) else {
+                    continue;
+                };
+                out.push(entry);
                 if out.len() >= limit {
                     return Ok(out);
                 }
@@ -887,6 +1046,42 @@ impl Client {
             }
         }
         out
+    }
+}
+
+#[cfg(test)]
+mod manga_history_tests {
+    use super::manga_history_entry;
+
+    #[test]
+    fn reads_episode_number_fractionally_and_keeps_date() {
+        let r = serde_json::json!({
+            "id": 71,
+            "name": "Yeni Manga",
+            "title_type": "manhwa",
+            "poster": "https://cdn.mangacix.net/new.jpg",
+            "date": 1_770_000_000_000_u64,
+            "episodes": [{ "id": 901, "episode_number": 1.5 }],
+            "videos": [{ "episode_num": 4 }]
+        });
+        let m = manga_history_entry(&r).expect("geçmiş kaydı çözülmeli");
+        assert_eq!(m.chapter_number, 1.5);
+        assert_eq!(m.chapter_label, "1.5. Bölüm");
+        assert_eq!(m.ts, 1_770_000_000_000_u64);
+    }
+
+    #[test]
+    fn falls_back_to_legacy_video_episode() {
+        let r = serde_json::json!({
+            "id": 72,
+            "name": "Eski Manga",
+            "date": 42,
+            "videos": [{ "episode_num": 7.0 }]
+        });
+        let m = manga_history_entry(&r).expect("eski geçmiş kaydı çözülmeli");
+        assert_eq!(m.chapter_number, 7.0);
+        assert_eq!(m.chapter_label, "7. Bölüm");
+        assert_eq!(m.ts, 42);
     }
 }
 
