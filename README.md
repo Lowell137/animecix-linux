@@ -1,4 +1,4 @@
-# AnimeciX
+# AnimeciX/Mangacix
 
 [![Sürümler](https://img.shields.io/github/v/release/Lowell137/animecix-linux?style=flat-square)](https://github.com/Lowell137/animecix-linux/releases/latest)
 [![Lisans: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
