@@ -124,19 +124,17 @@ impl MarathonView {
 
         let summary_titles: Vec<Title> = marathon_items.iter().map(|m| m.title.clone()).collect();
         let client_s = client.clone();
-        let (stx, srx) = std::sync::mpsc::channel::<(usize, u32)>();
-        std::thread::spawn(move || {
-            let fracs: Vec<f64> = summary_titles.iter().map(|t| client_s.title_progress_frac(t)).collect();
-            let _ = stx.send(marathon_summary(&fracs));
-        });
-        glib::idle_add_local(move || match srx.try_recv() {
-            Ok((done, percent)) => {
+        let (stx, srx) = futures::channel::oneshot::channel::<(usize, u32)>();
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok((done, percent)) = srx.await {
                 stats_lbl.set_text(&format!("{} / {} Anime Tamamlandı", done, total_count));
                 percent_pill.set_text(&format!("%{}", percent));
                 pbar.set_fraction((percent as f64 / 100.0).clamp(0.0, 1.0));
-                glib::ControlFlow::Break
             }
-            Err(_) => glib::ControlFlow::Continue,
+        });
+        std::thread::spawn(move || {
+            let fracs: Vec<f64> = summary_titles.iter().map(|t| client_s.title_progress_frac(t)).collect();
+            let _ = stx.send(marathon_summary(&fracs));
         });
 
         let list_box = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -244,16 +242,15 @@ impl MarathonView {
             info_box.append(&prog);
             let client_c = client.clone();
             let t_c = item.title.clone();
-            let (tx, rx) = std::sync::mpsc::channel::<f64>();
-            std::thread::spawn(move || { let _ = tx.send(client_c.title_progress_frac(&t_c)); });
+            let (tx, rx) = futures::channel::oneshot::channel::<f64>();
             let chk_u = chk.clone();
             let badge_u = badge.clone();
             let badge_icon_u = badge_icon.clone();
             let badge_lbl_u = badge_lbl.clone();
             let name_u = name_lbl.clone();
             let guard_u = chk_guard.clone();
-            glib::idle_add_local(move || match rx.try_recv() {
-                Ok(frac) => {
+            glib::MainContext::default().spawn_local(async move {
+                if let Ok(frac) = rx.await {
                     prog.set_fraction(frac);
                     let done = frac >= 0.999;
                     guard_u.set(true);
@@ -270,10 +267,9 @@ impl MarathonView {
                     badge_u.remove_css_class("status-badge-progress");
                     badge_u.add_css_class(if done { "status-badge-completed" } else { "status-badge-progress" });
                     if done { name_u.add_css_class("dim-label"); } else { name_u.remove_css_class("dim-label"); }
-                    glib::ControlFlow::Break
                 }
-                Err(_)   => glib::ControlFlow::Continue,
             });
+            std::thread::spawn(move || { let _ = tx.send(client_c.title_progress_frac(&t_c)); });
 
             let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
             actions.set_valign(gtk::Align::Center);
@@ -764,8 +760,8 @@ impl SettingsView {
         perf_group.set_title("Performans");
 
         let light_row = adw::SwitchRow::new();
-        light_row.set_title("Hafif Mod (Düşük RAM)");
-        light_row.set_subtitle("Arayüzü yazılımla çizer: NVIDIA çizici kütüphaneleri (~280 MB) yüklenmez, boştayken bellek belirgin düşer. Video açılınca oynatıcının kendi OpenGL bağlamı bu kütüphaneleri geri yükler, kazancın bir kısmı oynatırken kaybolur. Uygulamayı yeniden başlatınca geçerli olur.");
+        light_row.set_title("GPU Donanım Hızlandırmalı Çizici (GL)");
+        light_row.set_subtitle("Açıksa arayüzü GPU (OpenGL) ile çizer. Kapalıyken (varsayılan) yazılımla (Cairo) çizilir ve NVIDIA sürücüsü belleğe yüklenmediği için boşta RAM ~200 MB seviyesinde kalır. Değişiklik yeniden başlatınca geçerli olur.");
         light_row.set_active(settings.light_mode);
         perf_group.add(&light_row);
 

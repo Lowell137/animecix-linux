@@ -247,6 +247,7 @@ pub struct App {
     pub home_acts: Rc<RefCell<Vec<Option<usize>>>>,
     pub dl_manager: crate::download::DownloadManager,
     pub dl_rows: Rc<RefCell<HashMap<String, (gtk::ProgressBar, gtk::Image, gtk::Label)>>>,
+    pub is_online: Rc<Cell<bool>>,
     pub player: Rc<RefCell<Option<crate::player_window::EmbeddedPlayer>>>,
     pub cur_eps_title: Rc<Cell<u64>>,
     pub cur_eps: Rc<RefCell<Vec<Episode>>>,
@@ -487,6 +488,30 @@ fn aniskip_input_conf(t: &api::AniSkipTimes) -> String {
         "e show-text \"Outro zamanı bulunamadı (AniSkip)\" 2500\n".to_string()
     };
     format!("{skip_cmd}{outro_cmd}S seek -30; show-text \"30s Geri\" 2000\nEnd ignore\n")
+}
+
+    /// Sayfa inşasının "fark edilir donma" eşiği (ms). Altındaki süreler
+/// geçiş animasyonuna sığar, üstündekiler kullanıcıya gecikme olarak yansır.
+const SLOW_PAGE_MS: f64 = 60.0;
+
+fn page_label(page: &Page) -> &'static str {
+    match page {
+        Page::Welcome => "welcome",
+        Page::Home => "home",
+        Page::Favs => "favs",
+        Page::Marathon => "marathon",
+        Page::History => "history",
+        Page::Calendar => "calendar",
+        Page::News => "news",
+        Page::Kesfet => "kesfet",
+        Page::Search => "search",
+        Page::Account => "account",
+        Page::Downloads => "downloads",
+        Page::MangaHome => "manga_home",
+        Page::MangaKesfet => "manga_kesfet",
+        Page::MangaHistory => "manga_history",
+        _ => "diğer",
+    }
 }
 
 impl App {
@@ -930,6 +955,7 @@ impl App {
             home_acts: Rc::new(RefCell::new(Vec::new())),
             dl_manager: dl_mgr.clone(),
             dl_rows,
+            is_online: Rc::new(Cell::new(true)),
             player: Rc::new(RefCell::new(None)),
             cur_eps_title: Rc::new(Cell::new(0)),
             cur_eps: Rc::new(RefCell::new(Vec::new())),
@@ -1132,6 +1158,7 @@ impl App {
             home_acts: self.home_acts.clone(),
             dl_manager: self.dl_manager.clone(),
             dl_rows: self.dl_rows.clone(),
+            is_online: self.is_online.clone(),
             player: self.player.clone(),
             header_bar: self.header_bar.clone(),
             detail_actions: self.detail_actions.clone(),
@@ -1338,7 +1365,7 @@ impl App {
                         if id == SidebarId::Home {
                             this.fetch_manga_history();
                         }
-                    } else if id == SidebarId::Home {
+                    } else if id == SidebarId::Home && this.cats.borrow().is_empty() {
                         this.fetch_home();
                     }
                     this.auto_refresh(&page);
@@ -1558,27 +1585,21 @@ impl App {
             let icon_weak = item.icon.downgrade();
             let cache_c = self.sidebar_avatar_cache.clone();
 
-            let (tx, rx) = std::sync::mpsc::channel::<Option<Vec<u8>>>();
-            std::thread::spawn(move || {
-                let _ = tx.send(client.get_bytes(&url_c));
-            });
-
-            glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-                if let Ok(res) = rx.try_recv() {
-                    if let Some(bytes) = res {
-                        if let Some(tex) = crate::covers::CoverManager::scale_texture_circular(&bytes, 32) {
-                            if let (Some(p), Some(ic)) = (pic_weak.upgrade(), icon_weak.upgrade()) {
-                                p.set_paintable(Some(&tex));
-                                p.set_visible(true);
-                                ic.set_visible(false);
-                                *cache_c.borrow_mut() = Some((url.clone(), tex));
-                            }
+            let (tx, rx) = futures::channel::oneshot::channel::<Option<Vec<u8>>>();
+            glib::MainContext::default().spawn_local(async move {
+                if let Ok(Some(bytes)) = rx.await {
+                    if let Some(tex) = crate::covers::CoverManager::scale_texture_circular(&bytes, 32) {
+                        if let (Some(p), Some(ic)) = (pic_weak.upgrade(), icon_weak.upgrade()) {
+                            p.set_paintable(Some(&tex));
+                            p.set_visible(true);
+                            ic.set_visible(false);
+                            *cache_c.borrow_mut() = Some((url_c, tex));
                         }
                     }
-                    glib::ControlFlow::Break
-                } else {
-                    glib::ControlFlow::Continue
                 }
+            });
+            std::thread::spawn(move || {
+                let _ = tx.send(client.get_bytes(&url));
             });
         } else {
             *self.sidebar_avatar_cache.borrow_mut() = None;
@@ -1725,20 +1746,25 @@ impl App {
     }
 
     pub fn refresh_internet_status(&self) {
-        // Ana sayfayı yeniden inşa eder; build_home_view yeniden kontrol eder
-        let stack = self.stack.clone();
+        let (tx, rx) = futures::channel::oneshot::channel::<bool>();
         let this = self.clone_ref();
-        glib::timeout_add_local_once(
-            std::time::Duration::from_millis(50),
-            move || {
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok(online) = rx.await {
+                this.is_online.set(online);
+                let stack = this.stack.clone();
                 let widget = this.build_home_view();
                 if let Some(prev) = stack.child_by_name("home") {
                     stack.remove(&prev);
                 }
                 stack.add_named(&widget, Some("home"));
                 stack.set_visible_child_name("home");
-            },
-        );
+            }
+        });
+        std::thread::spawn(move || {
+            let status = crate::api::check_internet();
+            let is_on = matches!(status, crate::api::InternetStatus::Online);
+            let _ = tx.send(is_on);
+        });
     }
 
     fn apply_ui_scale(&self) {
@@ -1755,14 +1781,11 @@ impl App {
     fn apply_movie_tint(&self, target: &gtk::Box, poster: Option<&str>) {
         let Some(url) = poster.map(|s| s.to_string()) else { return };
         let client = self.client.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<Option<[(u8, u8, u8); 3]>>();
-        std::thread::spawn(move || {
-            let _ = tx.send(client.cover_palette(&url));
-        });
+        let (tx, rx) = futures::channel::oneshot::channel::<Option<[(u8, u8, u8); 3]>>();
         let weak = target.downgrade();
-        glib::idle_add_local(move || match rx.try_recv() {
-            Ok(pal) => {
-                let Some(root) = weak.upgrade() else { return glib::ControlFlow::Break };
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok(pal) = rx.await {
+                let Some(root) = weak.upgrade() else { return };
                 let [c1, c2, c3] =
                     pal.unwrap_or([(122, 162, 247), (55, 70, 110), (140, 110, 190)]);
                 let (r1, g1, b1) = c1;
@@ -1821,10 +1844,10 @@ impl App {
                     showing_a.set(!showing_a.get());
                     glib::ControlFlow::Continue
                 });
-                glib::ControlFlow::Break
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
+        });
+        std::thread::spawn(move || {
+            let _ = tx.send(client.cover_palette(&url));
         });
     }
 
@@ -1833,26 +1856,19 @@ impl App {
     fn apply_accent_gradient(&self, url: Option<&str>) {
         let Some(url) = url.map(|s| s.to_string()) else { return };
         let client = self.client.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<Option<[(u8, u8, u8); 3]>>();
-        std::thread::spawn(move || {
-            let _ = tx.send(client.cover_palette(&url));
-        });
+        let (tx, rx) = futures::channel::oneshot::channel::<Option<[(u8, u8, u8); 3]>>();
         let this = self.clone_ref();
         let my_gen = self.accent_gen.get();
-        glib::idle_add_local(move || match rx.try_recv() {
-            Ok(pal) => {
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok(pal) = rx.await {
                 // Arka plan işi bitene kadar kullanıcı sayfayı terk ettiyse boyama.
                 if this.accent_gen.get() != my_gen {
-                    return glib::ControlFlow::Break;
+                    return;
                 }
                 let [c1, c2, _c3] =
                     pal.unwrap_or([(122, 162, 247), (55, 70, 110), (140, 110, 190)]);
                 let (r1, g1, b1) = c1;
                 let (r2, g2, b2) = c2;
-                // Kitsune gibi: banner/poster'in baskın renkleri başlık bölgesini
-                // belirgin biçimde boyar, aşağıda pencere zeminine söner. Eskisi
-                // çok solukdu (0.16) — kullanıcı rengi "göremiyorum" dedi; alfa
-                // yükseltildi, üst parıltı + renk bandı genişletildi.
                 let css = format!(
                     "#accent-root {{ background-image: \
                      radial-gradient(ellipse 145% 105% at 50% -28%, \
@@ -1862,10 +1878,10 @@ impl App {
                      #accent-root > headerbar {{ background: none; border: none; box-shadow: none; }}"
                 );
                 this.accent_prov.load_from_string(&css);
-                glib::ControlFlow::Break
             }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(_) => glib::ControlFlow::Break,
+        });
+        std::thread::spawn(move || {
+            let _ = tx.send(client.cover_palette(&url));
         });
     }
 
@@ -1883,7 +1899,36 @@ impl App {
                 p.shutdown();
                 self.window.queue_draw();
             }
+            let had_player = self.player.borrow().is_some();
             *self.player.borrow_mut() = None;
+            if had_player {
+                // mpv/ffmpeg belleği kapanıştan sonra asenkron bırakır;
+                // birkaç kez OS'e iade ettir.
+                for secs in [1u32, 3, 8] {
+                    glib::timeout_add_seconds_local_once(secs, move || {
+                        unsafe {
+                            libmimalloc_sys::mi_collect(true);
+                            #[cfg(target_os = "linux")]
+                            libc::malloc_trim(0);
+                        }
+                        // Teşhis: kalan bellek heap (Anon) mi, kütüphane (File) mi?
+                        if let Ok(s) = std::fs::read_to_string("/proc/self/smaps_rollup") {
+                            let g = |k: &str| {
+                                s.lines()
+                                    .find(|l| l.starts_with(k))
+                                    .and_then(|l| l.split_whitespace().nth(1))
+                                    .and_then(|v| v.parse::<u64>().ok())
+                                    .unwrap_or(0)
+                                    / 1024
+                            };
+                            eprintln!(
+                                "[MEM] oynatıcıdan {secs}sn sonra: toplam {} MB (heap/anon {} MB, kütüphane/dosya {} MB)",
+                                g("Rss:"), g("Anonymous:"), g("Rss:").saturating_sub(g("Anonymous:"))
+                            );
+                        }
+                    });
+                }
+            }
         }
         // Native header yalnızca oynatıcıda gizlenir. Manga okuyucusunda
         // geri + tam ekran butonları header'da görünür (okuyucu barı bu
@@ -1931,7 +1976,7 @@ impl App {
                 stack.remove(&old);
             }
             stack.set_transition_type(transition);
-            stack.set_transition_duration(250);
+            stack.set_transition_duration(200);
             stack.add_named(&widget, Some(name));
             stack.set_visible_child_name(name);
 
@@ -1941,7 +1986,7 @@ impl App {
             // bittikten SONRA yapılır.
             let stack_c = stack.clone();
             glib::timeout_add_local_once(
-                std::time::Duration::from_millis(400),
+                std::time::Duration::from_millis(350),
                 move || {
                     let Some(visible) = stack_c.visible_child() else { return; };
                     let mut to_rm = vec![];
@@ -1956,10 +2001,15 @@ impl App {
                     for c in to_rm {
                         stack_c.remove(&c);
                     }
+                    #[cfg(target_os = "linux")]
+                    unsafe {
+                        libc::malloc_trim(0);
+                    }
                 },
             );
         }
 
+        let build_ms = std::time::Instant::now();
         match page {
             Page::Welcome => {
                 switch(&self.stack, "welcome", gtk::StackTransitionType::Crossfade, self.build_welcome_view());
@@ -2057,6 +2107,13 @@ impl App {
             Page::MangaHistory => {
                 switch(&self.stack, "manga_history", gtk::StackTransitionType::Crossfade, self.build_manga_history_view());
             }
+        }
+        // Sayfa inşası GTK ana iş parçacığında, geçiş animasyonundan ÖNCE
+        // çalışıyor; yani buradaki süre doğrudan kullanıcının "donma" dediği
+        // şey. Yavaş sayfaları görmek için (--check-ya da log) ölçüyoruz.
+        let built = build_ms.elapsed().as_secs_f64() * 1000.0;
+        if built >= SLOW_PAGE_MS {
+            eprintln!("[PERF] {} inşası {built:.0} ms", page_label(page));
         }
     }
 
@@ -2377,7 +2434,7 @@ impl App {
         // (zaman_ms, id, başlık, bölüm)
         let mut scored: Vec<(u64, u64, Title, Option<Episode>)> = Vec::new();
         if self.settings.borrow().local_history_enabled {
-            for h in &self.client.load_state().history {
+            for h in &self.client.load_state_raw().history {
                 scored.push((h.ts.saturating_mul(1000), h.title.id, h.title.clone(), Some(h.episode.clone())));
             }
         }
@@ -4303,26 +4360,23 @@ impl App {
             return;
         }
         let client = self.client.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<gtk::gdk::Texture>();
+        let (tx, rx) = futures::channel::oneshot::channel::<gtk::gdk::Texture>();
         let w = Self::READ_W;
+        let this = self.clone_ref();
+        let k = key.clone();
+        let pic_c = pic.clone();
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok(t) = rx.await {
+                this.covers.slice_cache_put(&k, t.clone());
+                pic_c.set_paintable(Some(&t));
+            }
+        });
         std::thread::spawn(move || {
             if let Some(bytes) = client.get_bytes(&url) {
                 if let Some(t) = CoverManager::manga_slice_texture(&bytes, w, y_off, h) {
                     let _ = tx.send(t);
                 }
             }
-        });
-        let this = self.clone_ref();
-        let k = key.clone();
-        let pic_c = pic.clone();
-        glib::idle_add_local(move || match rx.try_recv() {
-            Ok(t) => {
-                this.covers.slice_cache_put(&k, t.clone());
-                pic_c.set_paintable(Some(&t));
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         });
     }
 
@@ -4335,24 +4389,21 @@ impl App {
             return;
         }
         let client = self.client.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<gtk::gdk::Texture>();
+        let (tx, rx) = futures::channel::oneshot::channel::<gtk::gdk::Texture>();
         let w = Self::READ_W;
+        let this = self.clone_ref();
+        let k = key.clone();
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok(t) = rx.await {
+                this.covers.slice_cache_put(&k, t);
+            }
+        });
         std::thread::spawn(move || {
             if let Some(bytes) = client.get_bytes(&url) {
                 if let Some(t) = CoverManager::manga_slice_texture(&bytes, w, y_off, h) {
                     let _ = tx.send(t);
                 }
             }
-        });
-        let this = self.clone_ref();
-        let k = key.clone();
-        glib::idle_add_local(move || match rx.try_recv() {
-            Ok(t) => {
-                this.covers.slice_cache_put(&k, t);
-                glib::ControlFlow::Break
-            }
-            Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => glib::ControlFlow::Break,
         });
     }
 
@@ -5108,17 +5159,14 @@ impl App {
         scroll.set_child(Some(&outer));
 
         // İnternet bağlantı uyarısı (offline ise)
-        match crate::api::check_internet() {
-            crate::api::InternetStatus::Online => {}
-            crate::api::InternetStatus::Offline { reason } => {
-                let banner = adw::Banner::new("İnternet bağlantısı yok");
-                banner.set_button_label(Some("Yeniden Kontrol Et"));
-                let this = self.clone_ref();
-                banner.connect_button_clicked(move |_| {
-                    this.refresh_internet_status();
-                });
-                outer.append(&banner);
-            }
+        if !self.is_online.get() {
+            let banner = adw::Banner::new("İnternet bağlantısı yok");
+            banner.set_button_label(Some("Yeniden Kontrol Et"));
+            let this = self.clone_ref();
+            banner.connect_button_clicked(move |_| {
+                this.refresh_internet_status();
+            });
+            outer.append(&banner);
         }
 
         let cats = self.cats.borrow();
@@ -5149,11 +5197,15 @@ impl App {
         main_box.set_margin_end(12);
 
         self.fetch_server_history(true);
+        let mut section_ms = std::time::Instant::now();
         // Spot en üstte, bitişik (üzerinde yüzen hızlı arama hapı var).
         let spots = self.spotlight_items();
         if !spots.is_empty() {
             main_box.append(&self.build_spotlight(&spots));
         }
+        let spotlight_ms = section_ms.elapsed().as_secs_f64() * 1000.0;
+
+        section_ms = std::time::Instant::now();
         // Spotun altında: kaldığın yerler — site tarzı 5x2 ızgara,
         // başlıkta ‹ › (sayfa başına 10).
         {
@@ -5162,6 +5214,9 @@ impl App {
                 main_box.append(&self.build_continue_section(&items));
             }
         }
+        let continue_ms = section_ms.elapsed().as_secs_f64() * 1000.0;
+
+        section_ms = std::time::Instant::now();
         // Devamın altında: son eklenen bölümler (5x2 ızgara, ‹ › sayfalı).
         {
             let rail = self.last_rail.borrow().clone();
@@ -5169,9 +5224,22 @@ impl App {
                 main_box.append(&self.build_last_section(&rail));
             }
         }
+        let last_ms = section_ms.elapsed().as_secs_f64() * 1000.0;
 
+        section_ms = std::time::Instant::now();
+        let mut carousel_ms = 0.0;
         for (idx, cat) in cats.iter().enumerate() {
+            let one = std::time::Instant::now();
             main_box.append(&self.build_carousel(cat, idx));
+            carousel_ms += one.elapsed().as_secs_f64() * 1000.0;
+        }
+        // Bölüm dökümü yalnızca sayfa yavaışsa basılır; normalde sessiz.
+        if carousel_ms + spotlight_ms + continue_ms + last_ms >= SLOW_PAGE_MS as f64 {
+            eprintln!(
+                "[PERF] home bölümleri: spot {spotlight_ms:.0} | devam {continue_ms:.0} | \
+                 son {last_ms:.0} | karusel {carousel_ms:.0} ({} kategori)",
+                cats.len()
+            );
         }
 
         // Spotun üzerinde yüzen hızlı arama hapı. İçerik GNOME HIG'e göre
@@ -5370,30 +5438,28 @@ impl App {
                 }
                 let title = item.title.clone();
                 let client = this_toggle.client.clone();
-                let (tx, rx) = std::sync::mpsc::channel::<Result<usize, String>>();
-                std::thread::spawn(move || {
-                    let _ = tx.send(client.mark_title_watched(&title));
-                });
+                let (tx, rx) = futures::channel::oneshot::channel::<Result<usize, String>>();
                 let this_async = this_toggle.clone();
-                glib::idle_add_local(move || match rx.try_recv() {
-                    Err(std::sync::mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
-                    msg => {
+                glib::MainContext::default().spawn_local(async move {
+                    if let Ok(msg) = rx.await {
                         match msg {
-                            Ok(Ok(n)) => {
+                            Ok(n) => {
                                 this_async.client.set_marathon_completed(id, true);
                                 let toast = adw::Toast::new(&format!("{n} bölüm izlendi olarak işaretlendi!"));
                                 toast.set_timeout(2);
                                 this_async.toast.add_toast(toast);
                             }
-                            _ => {
+                            Err(_) => {
                                 let toast = adw::Toast::new("Bölüm listesi alınamadı (internete bağlı mısın?)");
                                 toast.set_timeout(3);
                                 this_async.toast.add_toast(toast);
                             }
                         }
                         this_async.show_page(&Page::Marathon);
-                        glib::ControlFlow::Break
                     }
+                });
+                std::thread::spawn(move || {
+                    let _ = tx.send(client.mark_title_watched(&title));
                 });
             },
             move |id| {
@@ -5783,17 +5849,9 @@ impl App {
 
         let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
 
-        // Üst şerit: AdwHeaderBar içinde arama girişi; kapatma düğmesi
-        // ELLE değil, AdwDialog'ın kendi pencere düğmeleri (AdwWindowButtons)
-        // — ayarlar penceresiyle aynı native görünüm.
-        // Giriş `gtk::Entry` + animecix-search-symbolic: GtkSearchEntry ikonu
-        // (system-search-symbolic) değiştirilemiyordu.
         let entry = gtk::Entry::new();
         entry.set_placeholder_text(Some("Anime veya dizi ara…"));
         entry.set_hexpand(true);
-        entry.set_margin_start(6);
-        entry.set_margin_end(6);
-        entry.set_margin_bottom(6);
         entry.set_icon_from_icon_name(
             gtk::EntryIconPosition::Primary,
             Some("animecix-search-symbolic"),
@@ -5806,11 +5864,30 @@ impl App {
                 e.set_text("");
             }
         });
-        let titlebar = adw::HeaderBar::new();
-        titlebar.add_css_class("flat");
-        titlebar.set_centering_policy(adw::CenteringPolicy::Loose);
-        titlebar.set_title_widget(Some(&entry));
-        root.append(&titlebar);
+
+        let header_box = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        header_box.set_margin_start(12);
+        header_box.set_margin_end(12);
+        header_box.set_margin_top(12);
+        header_box.set_margin_bottom(6);
+
+        let close_btn = gtk::Button::from_icon_name("window-close-symbolic");
+        close_btn.add_css_class("flat");
+        close_btn.add_css_class("circular");
+        close_btn.set_valign(gtk::Align::Center);
+        close_btn.set_tooltip_text(Some("Kapat"));
+        {
+            let dlg_w = dlg.downgrade();
+            close_btn.connect_clicked(move |_| {
+                if let Some(d) = dlg_w.upgrade() {
+                    d.close();
+                }
+            });
+        }
+
+        header_box.append(&entry);
+        header_box.append(&close_btn);
+        root.append(&header_box);
 
         let scroll = gtk::ScrolledWindow::new();
         scroll.set_hexpand(true);
@@ -5884,6 +5961,7 @@ impl App {
             // Arama modun farkında: manga modunda mangacix.net'e gider.
             let manga = self.manga_mode.get();
             entry.connect_changed(move |e| {
+                e.set_icon_sensitive(gtk::EntryIconPosition::Secondary, !e.text().is_empty());
                 let q = e.text().to_string();
                 let my = gen.get() + 1;
                 gen.set(my);
@@ -5909,17 +5987,14 @@ impl App {
                         if gen2.get() != my {
                             return;
                         }
-                        let (tx, rx) = std::sync::mpsc::channel();
-                        std::thread::spawn(move || {
-                            let _ = tx.send(client2.search(&q, manga));
-                        });
-                        glib::idle_add_local(move || match rx.try_recv() {
-                            Ok(res) => {
+                        let (tx, rx) = futures::channel::oneshot::channel::<Result<Vec<Title>, String>>();
+                        glib::MainContext::default().spawn_local(async move {
+                            if let Ok(res) = rx.await {
                                 if gen2.get() != my {
-                                    return glib::ControlFlow::Break;
+                                    return;
                                 }
                                 let Some(box_) = results_w2.upgrade() else {
-                                    return glib::ControlFlow::Break;
+                                    return;
                                 };
                                 clear(&box_);
                                 match res {
@@ -6009,9 +6084,10 @@ impl App {
                                         box_.append(&lbl);
                                     }
                                 }
-                                glib::ControlFlow::Break
                             }
-                            Err(_) => glib::ControlFlow::Continue,
+                        });
+                        std::thread::spawn(move || {
+                            let _ = tx.send(client2.search(&q, manga));
                         });
                     },
                 );
@@ -8845,19 +8921,17 @@ impl App {
         R: FnOnce() -> Msg + Send + 'static,
     {
         let c = self.client.clone();
-        let (tx, rx) = std::sync::mpsc::channel::<Msg>();
+        let (tx, rx) = futures::channel::oneshot::channel::<Msg>();
+        let this = self.clone_ref();
+        glib::MainContext::default().spawn_local(async move {
+            if let Ok(msg) = rx.await {
+                this.busy(false);
+                this.handle_msg(msg);
+            }
+        });
         std::thread::spawn(move || {
             let res_fn = f(c);
             let _ = tx.send(res_fn());
-        });
-        let this = self.clone_ref();
-        glib::idle_add_local(move || match rx.try_recv() {
-            Ok(msg) => {
-                this.busy(false);
-                this.handle_msg(msg);
-                glib::ControlFlow::Break
-            }
-            Err(_) => glib::ControlFlow::Continue,
         });
     }
 
@@ -9236,8 +9310,15 @@ impl App {
 
     /// Sunucu geçmişi yanıtı: listeyi güncelle (reset=sıfırdan) ve görünüyorsa tazele.
     fn on_server_history(&self, res: Result<(Vec<api::ServerEntry>, usize), String>, reset: bool) {
+        let sig = |v: &Vec<api::ServerEntry>| -> Vec<(u64, u64)> {
+            v.iter().map(|e| (e.title.id, e.date)).collect()
+        };
+        let before = sig(&self.server_history.borrow());
+        let total_before = self.server_total.get();
+        let mut ok = false;
         match res {
             Ok((titles, total)) => {
+                ok = true;
                 if reset {
                     *self.server_history.borrow_mut() = titles;
                     self.server_pool_pages.set(3);
@@ -9263,6 +9344,14 @@ impl App {
                 // Bayrağı geri al, sonra tekrar denensin.
                 self.server_history_loaded.set(false);
             }
+        }
+        // Veri değişmediyse sayfayı yeniden kurma (geçişte takılma yapıyordu).
+        if ok
+            && !reset
+            && sig(&self.server_history.borrow()) == before
+            && self.server_total.get() == total_before
+        {
+            return;
         }
         let top = self.page_history.borrow().last().cloned();
         if top == Some(Page::History) || top == Some(Page::Home) {

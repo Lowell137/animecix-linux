@@ -214,7 +214,28 @@ pub fn check_and_prompt<W: IsA<gtk::Window> + Clone + 'static>(
         }
         return;
     }
-    let (tx, rx) = channel::<Result<Option<(String, String, String)>, String>>();
+    let (tx, rx) = futures::channel::oneshot::channel::<Result<Option<(String, String, String)>, String>>();
+    let win = window.clone();
+    let mut on_suppress = Some(on_suppress_uptodate);
+    glib::MainContext::default().spawn_local(async move {
+        if let Ok(res) = rx.await {
+            match res {
+                Ok(Some((tag, url, sig_url))) => {
+                    present_update_dialog(win.clone(), &tag, &url, &sig_url);
+                }
+                Ok(None) => {
+                    if show_if_uptodate {
+                        if let Some(f) = on_suppress.take() {
+                            present_uptodate(&win, f);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Güncelleme kontrolü başarısız: {e}");
+                }
+            }
+        }
+    });
     std::thread::spawn(move || {
         let res = (|| -> Result<Option<(String, String, String)>, String> {
             let rel = latest_release()?;
@@ -236,29 +257,6 @@ pub fn check_and_prompt<W: IsA<gtk::Window> + Clone + 'static>(
             Ok(Some((rel.tag_name, url, sig_url)))
         })();
         let _ = tx.send(res);
-    });
-
-    let win = window.clone();
-    let mut on_suppress = Some(on_suppress_uptodate);
-    glib::idle_add_local(move || match rx.try_recv() {
-        Ok(Ok(Some((tag, url, sig_url)))) => {
-            present_update_dialog(win.clone(), &tag, &url, &sig_url);
-            ControlFlow::Break
-        }
-        Ok(Ok(None)) => {
-            if show_if_uptodate {
-                if let Some(f) = on_suppress.take() {
-                    present_uptodate(&win, f);
-                }
-            }
-            ControlFlow::Break
-        }
-        Ok(Err(e)) => {
-            eprintln!("Güncelleme kontrolü başarısız: {e}");
-            ControlFlow::Break
-        }
-        Err(std::sync::mpsc::TryRecvError::Empty) => ControlFlow::Continue,
-        Err(std::sync::mpsc::TryRecvError::Disconnected) => ControlFlow::Break,
     });
 }
 

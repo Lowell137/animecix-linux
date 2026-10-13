@@ -65,8 +65,8 @@ pub fn poster_card(
         b.set_size_request(34, 34);
         b.set_halign(gtk::Align::Start);
         b.set_valign(gtk::Align::Start);
-        b.set_margin_top(10);
-        b.set_margin_start(10);
+        b.set_margin_top(6);
+        b.set_margin_start(6);
         b.set_visible(false);
         b.set_tooltip_text(Some(if member {
             "Maratonda (çıkarmak için tıkla)"

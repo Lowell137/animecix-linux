@@ -149,6 +149,9 @@ struct PlayerState {
     tau_qualities: Arc<Mutex<Vec<(String, String)>>>,
     /// Sunucuya son konum raporu (60sn'de bir).
     last_report: Instant,
+    /// Üst barın tam ekran butonu: ikonu `set_fullscreen` içinde günceller
+    /// (`notify::is-fullscreen` bu kurulumda yayınlanmıyor).
+    fs_icon: gtk::Button,
 }
 
 /// Sayfaya gömülen oynatıcı. `App.player` içinde tutulur;
@@ -379,6 +382,14 @@ fn set_fullscreen(state: &Rc<RefCell<PlayerState>>, controls: &gtk::Revealer, on
         }
         show_chrome_locked(&mut state.borrow_mut(), controls);
     }
+    // `notify::is-fullscreen` bu kurulumda (Wayland + KDE) yayınlanmıyor,
+    // bu yüzden ikonu doğrudan burada değiştiriyoruz. F tuşu da bu
+    // fonksiyondan geçtiği için her iki yol da senkron kalır.
+    state.borrow().fs_icon.set_icon_name(if on {
+        "animecix-unfullscreen-symbolic"
+    } else {
+        "animecix-fullscreen-symbolic"
+    });
 }
 
 /// Fare hareketi: kromu göster, boşta-sayar saati sıfırla.
@@ -813,7 +824,7 @@ impl CtxMenu<'_> {
         ctx_row(
             &self.v, self.pop,
             if is_fs { "Pencereli moda dön" } else { "Tam ekran" },
-            if is_fs { "view-restore-symbolic" } else { "view-fullscreen-symbolic" },
+            if is_fs { "animecix-unfullscreen-symbolic" } else { "animecix-fullscreen-symbolic" },
             true, Some("F"),
             move || set_fullscreen(&st_c, &rev_c, !is_fs),
         );
@@ -866,7 +877,7 @@ impl CtxMenu<'_> {
         ctx_row(
             &self.v, self.pop,
             if fill { "Orijinal oran" } else { "Ekranı doldur" },
-            "view-fullscreen-symbolic",
+            "animecix-fullscreen-symbolic",
             true, Some("A"),
             move || {
                 if let Ok(s) = st_c.try_borrow() {
@@ -1633,7 +1644,7 @@ pub fn build_embedded_player(
             }
         });
     }
-    let fs_btn = gtk::Button::from_icon_name("view-fullscreen-symbolic");
+    let fs_btn = gtk::Button::from_icon_name("animecix-fullscreen-symbolic");
     fs_btn.add_css_class("flat");
     fs_btn.add_css_class("circular");
     fs_btn.add_css_class("osd");
@@ -1937,6 +1948,7 @@ pub fn build_embedded_player(
         source_res: Arc::new(Mutex::new(vec![None; sources_len_for_sizes])),
         tau_qualities: Arc::new(Mutex::new(Vec::new())),
         last_report: Instant::now(),
+        fs_icon: fs_btn.clone(),
     }));
     let _ = &req.fast_embeds;
 

@@ -18,6 +18,9 @@ use app::App;
 use adw::prelude::*;
 use std::process::Command;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 const ANIMECIX_PNG_ICON: &[u8] = include_bytes!("../assets/hicolor/256x256/apps/tr.com.animecix.png");
 
 const ANIMECIX_SVG_ICON: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
@@ -34,61 +37,76 @@ const ANIMECIX_SVG_ICON: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
 
 /// Özel yan-menü ikonlarını tema rengine göre hicolor'a kurar
 /// (koyu temada açık, açık temada koyu çizgi).
-fn ensure_sidebar_icon() {
-    const OPEN_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-sidebar-symbolic.svg");
-    const COLLAPSED_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-sidebar-collapse-symbolic.svg");
-    const NEWS_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-news-symbolic.svg");
-    const SEARCH_SVG: &str = include_str!("../assets/hicolor/scalable/actions/animecix-search-symbolic.svg");
-    const SEEK_BACK_SVG: &str = include_str!("../assets/hicolor/scalable/actions/seek-backward-10-symbolic.svg");
-    const SEEK_FORWARD_SVG: &str = include_str!("../assets/hicolor/scalable/actions/seek-forward-10-symbolic.svg");
-    let dark = adw::StyleManager::default().is_dark();
-    let fill = if dark { "#e8e8e8" } else { "#222222" };
-    let home = std::env::var("HOME").unwrap_or_default();
-    if home.is_empty() {
-        return;
-    }
-    let dir = format!("{home}/.local/share/icons/hicolor/scalable/actions");
-    let mut changed = false;
-    for (name, src) in [
-        ("animecix-sidebar-symbolic.svg", OPEN_SVG),
-        ("animecix-sidebar-collapse-symbolic.svg", COLLAPSED_SVG),
-        ("animecix-news-symbolic.svg", NEWS_SVG),
-        ("animecix-search-symbolic.svg", SEARCH_SVG),
-        ("seek-backward-10-symbolic.svg", SEEK_BACK_SVG),
-        ("seek-forward-10-symbolic.svg", SEEK_FORWARD_SVG),
-    ] {
-        let content = src.replace("#222222", fill);
-        let path = format!("{dir}/{name}");
-        let same = std::fs::read_to_string(&path).ok() == Some(content.clone());
-        if !same {
-            if std::fs::create_dir_all(&dir).is_ok() {
-                if std::fs::write(&path, content.as_bytes()).is_ok() {
-                    changed = true;
-                }
-            }
+const ICONS_GRESOURCE: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/icons.gresource"));
+const ICON_RESOURCE_PATH: &str = "/tr/com/animecix/icons";
+const ICON_ACTION_DIR: &str = "/tr/com/animecix/icons/scalable/actions";
+
+fn register_embedded_icons(display: &gtk::gdk::Display) {
+    let bytes = glib::Bytes::from_static(ICONS_GRESOURCE);
+    let resource = match gio::Resource::from_data(&bytes) {
+        Ok(res) => res,
+        Err(e) => {
+            // Sessiz geçmek kırık ikon demek: gresource gömülü değilse tema
+            // Adwaita'ya düşer ve animecix-* ikonları bulunamaz.
+            eprintln!("[ICON] gömülü gresource yüklenemedi ({} bayt): {e}", bytes.len());
+            return;
         }
-    }
-    // Yeni eklenen ikon, bayat icon-theme.cache tarafından gölgeleniyorsa
-    // GTK onu bulamaz (boş/bozuk görünür) — önbelleği tazele ya da sil.
-    if changed {
-        refresh_hicolor_cache(&format!("{home}/.local/share/icons/hicolor"));
+    };
+    gio::resources_register(&resource);
+
+    let theme = gtk::IconTheme::for_display(display);
+    theme.add_resource_path(ICON_RESOURCE_PATH);
+}
+
+/// Gömülü ikonların gerçekten çözülüp çözülmediğini denetler.
+/// Gömülen her ikonu tek tek `has_icon`'a sorar, çözemeyenleri stderr'e yazar.
+fn audit_embedded_icons(display: &gtk::gdk::Display) {
+    let theme = gtk::IconTheme::for_display(display);
+    theme.add_resource_path(ICON_RESOURCE_PATH);
+    let resource = match gio::Resource::from_data(&glib::Bytes::from_static(ICONS_GRESOURCE)) {
+        Ok(res) => res,
+        Err(_) => return, // register zaten stderr'e yazdı
+    };
+    let names = match resource.enumerate_children(ICON_ACTION_DIR, gio::ResourceLookupFlags::NONE) {
+        Ok(n) => n,
+        Err(e) => {
+            eprintln!("[ICON] {ICON_ACTION_DIR} okunamadı: {e}");
+            return;
+        }
+    };
+    // enumerate_children uzantıyı da verir ("x-symbolic.svg"); tema ise
+    // uzantısız isim bekler ("x-symbolic"). Uzantısızla karşılaştır.
+    let missing: Vec<&glib::GString> = names
+        .iter()
+        .filter(|n| !theme.has_icon(n.strip_suffix(".svg").unwrap_or(n)))
+        .collect();
+    eprintln!(
+        "[ICON] {} gömülü ikon, {} çözüldü, {} çözülemedi",
+        names.len(),
+        names.len() - missing.len(),
+        missing.len()
+    );
+    for n in &missing {
+        eprintln!("[ICON] çözülemedi: {n}");
     }
 }
 
-/// `~/.local/share/icons/hicolor` önbelleğini tazeler; araç yoksa
-/// bayat `icon-theme.cache` dosyasını siler (GTK dizini tarar, zararsız).
-fn refresh_hicolor_cache(hicolor_dir: &str) {
-    let cache = format!("{hicolor_dir}/icon-theme.cache");
-    if !std::path::Path::new(&cache).exists() {
-        return;
-    }
-    let updated = std::process::Command::new("gtk-update-icon-cache")
-        .args(["-f", "-t", hicolor_dir])
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false);
-    if !updated {
-        let _ = std::fs::remove_file(&cache);
+fn cmd_check_icons() {
+    // Kaynak baytları embedded hâlde geliyor; teşhis için ayrı çalıştırılır.
+    let resource = match gio::Resource::from_data(&glib::Bytes::from_static(ICONS_GRESOURCE)) {
+        Ok(res) => res,
+        Err(e) => {
+            eprintln!("[ICON] gresource ayrıştırılamadı ({} bayt): {e}", ICONS_GRESOURCE.len());
+            eprintln!("[ICON] paketlenmiş binary ikonları gömülü değil.");
+            std::process::exit(1);
+        }
+    };
+    let names = resource
+        .enumerate_children(ICON_ACTION_DIR, gio::ResourceLookupFlags::NONE)
+        .expect("ikon dizini okunamadı");
+    println!("[ICON] gresource geçerli, {} ikon gömülü", names.len());
+    for n in &names {
+        println!("  {n}");
     }
 }
 
@@ -113,6 +131,9 @@ fn main() {
     if raw_args.iter().any(|a| a == "--check-shaders") {
         return cmd_check_shaders();
     }
+    if raw_args.iter().any(|a| a == "--check-icons") {
+        return cmd_check_icons();
+    }
     let mut filtered: Vec<String> = Vec::new();
     let mut it = raw_args.iter();
     if let Some(p) = it.next() {
@@ -122,28 +143,18 @@ fn main() {
         if a == "--goto" {
             let _ = it.next(); // değeri atla
         } else if a.starts_with("--goto=") {
-        } else if a == "--dump-layout" {
-            // teşhis bayrağı GTK'ya gitmesin, env'den okunur
+        } else if a == "--dump-layout" || a == "--check-shaders" || a == "--check-icons" {
+            // teşhis bayrakları GTK'ya gitmesin, env'den okunur
         } else {
             filtered.push(a.clone());
         }
     }
 
-    std::env::set_var("MALLOC_ARENA_MAX", "2");
-
-    // Doku verileri (GdkTexture) 100 KB+ bloklar; glibc bunları heap'te
-    // tutuyor ve serbest bırakıldığında RSS'te kalıyor. Eşiğe mmap
-    // koyunca serbest bırakılan doku anında OS'e döner.
-    //
-    // Daha önce `malloc_trim` + `MALLOC_TRIM_THRESHOLD_` denemiştim; o her
-    // serbestlemede tüm arena'ları gezip UI'yi donduruyordu. Mallopt tek
-    // seferlik bir ayar, sayfa geçişlerinde tarama yok.
-    //
-    // M_MMAP_THRESHOLD_ elle verilince glibc'in "dinamik eşik" büyütmesi
-    // de kapanır (aksi halde ilk büyük blok serbest bırakılınca eşik onu
-    // geçecek şekilde büyür ve ayar etkisini yitirirdi).
+    #[cfg(target_os = "linux")]
     unsafe {
+        libc::mallopt(libc::M_ARENA_MAX, 2);
         libc::mallopt(libc::M_MMAP_THRESHOLD, 64 * 1024);
+        libc::mallopt(libc::M_TRIM_THRESHOLD, 64 * 1024);
     }
 
     // "Hafif Mod": GTK'nin GL çizicisini yazılıma düşür. NVIDIA yığını
@@ -151,9 +162,20 @@ fn main() {
     // düşük RAM'li makinelerde asıl kazanç bu. Ayar `light_mode`
     // alanında; anahtar burada hiç okunmuyordu, sadece arayüzde vardı.
     // GSK_RENDERER GTK başlamadan verilmek zorunda.
-    if api::Client::read_settings().light_mode {
-        std::env::set_var("GSK_RENDERER", "cairo");
-        eprintln!("[PERF] hafif mod: arayüz yazılımla çizilecek (GSK_RENDERER=cairo)");
+
+    if std::env::var_os("GSK_RENDERER").is_none() {
+        let settings = api::Client::read_settings();
+        if settings.light_mode {
+            // Kullanıcı GPU render (gl) açık kalsın istediyse
+            std::env::set_var("GSK_RENDERER", "gl");
+            eprintln!("[PERF] GPU çizici devrede (GSK_RENDERER=gl)");
+        } else {
+            // Varsayılan olarak cairo (yazılımsal) çizici kullanılır.
+            // Bu sayede NVIDIA sürücüsünün (libnvidia-gpucomp 60MB, libLLVM 25MB, eglcore 20MB)
+            // gereksiz yere RAM'e yüklenmesi engellenir ve boşta RAM ~200 MB seviyesinde kalır.
+            std::env::set_var("GSK_RENDERER", "cairo");
+            eprintln!("[PERF] Düşük RAM modu devrede: Arayüz cairo ile çiziliyor (GSK_RENDERER=cairo)");
+        }
     }
 
     let app_id = std::env::var("FLATPAK_ID").unwrap_or_else(|_| "tr.com.animecix".to_string());
@@ -167,7 +189,8 @@ fn main() {
             // klonu) medya kontrol gliflerini bozuyor/kendi tarzına
             // çeviriyor. Uygulama zaten libadwaita tabanlı.
             gtk::Settings::for_display(&display).set_gtk_icon_theme_name(Some("Adwaita"));
-            ensure_sidebar_icon();
+            register_embedded_icons(&display);
+            audit_embedded_icons(&display);
             let mut base = std::path::PathBuf::new();
             if let Ok(exe) = std::env::current_exe() {
                 if let Some(dir) = exe.parent() {
@@ -437,28 +460,6 @@ fn main() {
                     margin-right: 0px;
                 }
 
-                /* === Dock mini butonlar (daraltılmış üst bar) === */
-                .dock-mini {
-                    min-width: 24px;
-                    min-height: 24px;
-                    padding: 2px;
-                }
-
-                /* === Daraltılmış sidebar satırları: dolguyu sıfırla === */
-                .side-dock {
-                    min-width: 0px;
-                    padding-left: 2px;
-                    padding-right: 2px;
-                    padding-top: 4px;
-                    padding-bottom: 4px;
-                }
-
-                /* === Dock alt yazıları === */
-                .side-caption {
-                    font-size: 0.74em;
-                    font-weight: 400;
-                    color: alpha(currentColor, 0.65);
-                }
 
                 /* === Kart Başlık Yazısı === */
                 .card-title {
@@ -529,7 +530,7 @@ fn main() {
                     font-weight: 700;
                 }
                 headerbar button.title-menu:hover,
-                headerbar button.title-menu[active],
+                headerbar button.title-menu:checked,
                 headerbar button.title-menu:focus-visible,
                 headerbar button.title-menu:focus {
                     background-color: transparent;
@@ -542,8 +543,8 @@ fn main() {
                     -gtk-icon-size: 12px;
                     opacity: 0.55;
                     color: #9a9996;
-                    margin-start: 2px;
-                    margin-end: 0;
+                    margin-left: 2px;
+                    margin-right: 0;
                 }
 
                 /* Popover listesi */
@@ -701,6 +702,26 @@ fn main() {
                     border-color: alpha(@accent_color, 0.35);
                 }
 
+                /* Okuyucu arka planı: Sistem (şeffaf) | Siyah | Beyaz */
+                .manga-bg-system {
+                    background-color: transparent;
+                }
+                .manga-bg-black {
+                    /* Adwaita koyu yüzeyi (#1e1e1e) — saf siyah değil. */
+                    background-color: #1e1e1e;
+                    color: #ffffff;
+                }
+                .manga-bg-white {
+                    background-color: #ffffff;
+                    color: #1a1a1a;
+                }
+                .manga-bg-black label,
+                .manga-bg-black button,
+                .manga-bg-white label,
+                .manga-bg-white button {
+                    color: inherit;
+                }
+
                 .status-badge-completed {
                     background-color: alpha(#2ec27e, 0.18);
                     color: #2ec27e;
@@ -829,6 +850,15 @@ fn main() {
 
         }
         let app_inst = App::new(app);
+
+        // Boşta kalan heap sayfalarını OS'e iade et (her 60 saniyede bir)
+        glib::timeout_add_seconds_local(60, || {
+            #[cfg(target_os = "linux")]
+            unsafe {
+                libc::malloc_trim(0);
+            }
+            glib::ControlFlow::Continue
+        });
         // Teşhis bayrağı: yerleşim ölçülerini dök.
         if std::env::args().any(|a| a == "--dump-layout") {
             let inst_c = app_inst.clone_ref();

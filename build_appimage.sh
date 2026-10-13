@@ -169,6 +169,29 @@ if [ -f "$ICON_SRC" ]; then
     cp "$ICON_SRC" "$APPDIR/.DirIcon"
 fi
 
+if [ ! -d "assets/hicolor/scalable/actions" ]; then
+    echo "HATA: assets/hicolor/scalable/actions yok — sembolik ikon kaynağı eksik." >&2
+    echo "      (tarball'dan derlemede bu klasör gelmiyor; kaynak ağacı doğrula)" >&2
+    exit 1
+fi
+
+if [ -d "assets/hicolor" ]; then
+    mkdir -p "$APPDIR/usr/share/icons/hicolor"
+    cp -r assets/hicolor/* "$APPDIR/usr/share/icons/hicolor/"
+fi
+
+# 4b. Gömülü ikon doğrulaması. Uygulamanın tek ikon kaynağı binary'nin
+# içindeki gresource; diske kopyalanan hicolor sadece yedek. Kırık paket
+# üretmemek için binary'yi burada kendi teşhis bayrağıyla sınayıp
+# çözülmeyen ikon varsa burada duruyoruz.
+echo "==> Gömülü ikonlar doğrulanıyor (animecix --check-icons)..."
+if ! ICON_CHECK="$("$APPDIR/usr/bin/animecix" --check-icons 2>&1)"; then
+    echo "HATA: paketlenen binary ikonları gömülü değil." >&2
+    echo "$ICON_CHECK" >&2
+    exit 1
+fi
+echo "    ${ICON_CHECK%%$'\n'*}"
+
 # 5. .desktop dosyası oluştur
 cat > "$APPDIR/tr.com.animecix.desktop" <<EOF
 [Desktop Entry]

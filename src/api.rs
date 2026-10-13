@@ -139,7 +139,7 @@ const TAU: &str = "https://tau-video.xyz";
 const API_TTL_SECS: u64 = 3 * 3600;
 const IMG_TTL_SECS: u64 = 7 * 24 * 3600;
 
-const MAX_IMG_CACHE_ENTRIES: usize = 60;
+const MAX_IMG_CACHE_ENTRIES: usize = 12;
 
 fn trim_img_cache(map: &mut HashMap<String, (u64, Vec<u8>)>) {
     if map.len() <= MAX_IMG_CACHE_ENTRIES {
@@ -163,6 +163,12 @@ pub struct Client {
     cache_dir: PathBuf,
     translators: std::sync::Mutex<HashMap<i64, TranslatorMeta>>,
     pub(crate) pos_cache: std::sync::Mutex<HashMap<(u64, u64, u64), (std::time::Instant, f64)>>,
+    /// Maraton başlıklarının kimlik kümesi. Ana sayfa kart başına
+    /// `is_in_marathon` soruyor; `load_state()` her seferinde state.json'u
+    /// (bu makinede 1.3 MB) okuyup ayrıştırıyor ve `hydrate_title` üzerinden
+    /// bloklayıcı arama riski taşıyordu. 50 kart = 50 tam ayrıştırma.
+    /// `save_state` her yazmada geçersiz kılıyor.
+    marathon_ids: std::sync::Mutex<Option<std::collections::HashSet<u64>>>,
     pub(crate) session: std::sync::Mutex<crate::auth::Session>,
 }
 
@@ -1291,6 +1297,7 @@ impl Client {
             cache_dir,
             translators: std::sync::Mutex::new(HashMap::new()),
             pos_cache: std::sync::Mutex::new(HashMap::new()),
+            marathon_ids: std::sync::Mutex::new(None),
             session: std::sync::Mutex::new(crate::auth::Session::load()),
         }
     }
@@ -3398,13 +3405,20 @@ impl Client {
         }
     }
 
-    pub fn load_state(&self) -> State {
+    /// Durumu yalnızca diskten okur; eksik başlık bilgisini ağdan
+    /// tamamlamaz. UI iş parçacığında (sayfa kurulumu) bu kullanılmalı —
+    /// `load_state` içindeki `hydrate_title` bloklayıcı arama yapabilir.
+    pub fn load_state_raw(&self) -> State {
         let p = Self::state_path();
-        let mut st = std::fs::read_to_string(&p)
+        std::fs::read_to_string(&p)
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .map(|v| Self::migrate_state(&v))
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    pub fn load_state(&self) -> State {
+        let mut st = self.load_state_raw();
         let mut changed = false;
         for m in &mut st.marathon {
             if self.hydrate_title(&mut m.title) {
@@ -3757,6 +3771,7 @@ impl Client {
             std::fs::create_dir_all(parent).ok();
         }
         let _ = std::fs::write(&p, serde_json::to_string_pretty(st).unwrap_or_default());
+        self.invalidate_marathon_ids();
     }
 
     pub fn is_saved(&self, id: u64) -> bool {
@@ -3781,7 +3796,20 @@ impl Client {
     }
 
     pub fn is_in_marathon(&self, id: u64) -> bool {
-        self.load_state().marathon.iter().any(|m| m.title.id == id)
+        // Kart başına ana iş parçacığından soruluyor; bu yüzden hydrate
+        // EDİLMEDİK (raw) durum okunur ve sonuç bellekte tutulur.
+        // `load_state` içindeki `hydrate_title` bloklayıcı arama yapabilir.
+        let mut guard = self.marathon_ids.lock().unwrap();
+        if guard.is_none() {
+            let st = self.load_state_raw();
+            *guard = Some(st.marathon.iter().map(|m| m.title.id).collect());
+        }
+        guard.as_ref().is_some_and(|ids| ids.contains(&id))
+    }
+
+    /// Maraton kimlik kümesini geçersiz kılar (durum yazıldıktan sonra).
+    fn invalidate_marathon_ids(&self) {
+        *self.marathon_ids.lock().unwrap() = None;
     }
 
     pub fn toggle_marathon(&self, t: &Title) -> bool {

@@ -56,9 +56,23 @@ pub fn new_sized_picture(w: i32, h: i32) -> gtk::Picture {
     pic
 }
 
+    /// Ana iş parçacığına taşınabilecek sıkı piksel tamponu.
+///
+/// `gdk_pixbuf::Pixbuf` Rust tarafında `Send` değil; bu yüzden iş
+/// parçacığında dokuyu değil düz baytları gönderiyoruz. Ana döngüde
+/// yeniden Pixbuf kurulup dokuya yükleniyor.
+struct ScaledCover {
+    w: i32,
+    h: i32,
+    nch: i32,
+    stride: i32,
+    data: Vec<u8>,
+}
+
 pub struct CoverManager {
     client: Arc<Client>,
     cache: Rc<RefCell<HashMap<String, Option<gtk::gdk::Texture>>>>,
+    cache_order: Rc<RefCell<VecDeque<String>>>,
     waiters: Rc<RefCell<HashMap<String, Vec<gtk::Picture>>>>,
     queue: Arc<Mutex<VecDeque<String>>>,
     active: Rc<Cell<usize>>,
@@ -71,6 +85,7 @@ impl CoverManager {
         Self {
             client,
             cache: Rc::new(RefCell::new(HashMap::new())),
+            cache_order: Rc::new(RefCell::new(VecDeque::new())),
             waiters: Rc::new(RefCell::new(HashMap::new())),
             queue: Arc::new(Mutex::new(VecDeque::new())),
             active: Rc::new(Cell::new(0)),
@@ -82,6 +97,7 @@ impl CoverManager {
         Self {
             client: self.client.clone(),
             cache: self.cache.clone(),
+            cache_order: self.cache_order.clone(),
             waiters: self.waiters.clone(),
             queue: self.queue.clone(),
             active: self.active.clone(),
@@ -133,7 +149,7 @@ impl CoverManager {
     }
 
     pub fn slice_cache_put(&self, key: &str, t: gtk::gdk::Texture) {
-        const SLICE_CACHE_MAX: usize = 12;
+        const SLICE_CACHE_MAX: usize = 5;
         let mut c = self.slice_cache.borrow_mut();
         // Basit FIFO: en eskiyi düşür.
         while c.len() >= SLICE_CACHE_MAX {
@@ -253,7 +269,7 @@ impl CoverManager {
         self.pump_covers();
     }
 
-    pub fn scale_texture(bytes: &[u8], w: i32, h: i32) -> Option<gtk::gdk::Texture> {
+    pub fn scale_pixbuf(bytes: &[u8], w: i32, h: i32) -> Option<gdk_pixbuf::Pixbuf> {
         let loader = gdk_pixbuf::PixbufLoader::new();
         loader.write(bytes).ok()?;
         loader.close().ok()?;
@@ -275,10 +291,12 @@ impl CoverManager {
         if x + cw > dw || y + ch > dh {
             return None;
         }
-        let cropped = big.new_subpixbuf(x, y, cw, ch);
-        // Hedef küçükse köşede kalmasın diye ortaya yerleştirilemez
-        // (texture tam boyutta) — boyutlar zaten hedefe eşit.
-        Some(gtk::gdk::Texture::for_pixbuf(&cropped))
+        Some(big.new_subpixbuf(x, y, cw, ch))
+    }
+
+    pub fn scale_texture(bytes: &[u8], w: i32, h: i32) -> Option<gtk::gdk::Texture> {
+        let pb = Self::scale_pixbuf(bytes, w, h)?;
+        Some(gtk::gdk::Texture::for_pixbuf(&pb))
     }
 
     /// Görseli tam daire şeklinde kırparak (köşeleri şeffaf yaparak) Texture döner.
@@ -361,7 +379,6 @@ impl CoverManager {
     }
 
     fn pump_covers(&self) {
-        // 12 eşzamanlı decode 6 çekirdekte UI'yi açıkça geciktiriyordu.
         let max_workers = 6;
         let mut active = self.active.get();
 
@@ -369,76 +386,128 @@ impl CoverManager {
             let url = self.queue.lock().unwrap().pop_front();
             let Some(url) = url else { break };
 
+            // Bu URL'i bekleyen anahtarları ve boyutlarını ANA iş parçacığında
+            // topla. Piksel işi (çöz + ölçekle + kırp) iş parçacığında
+            // yapılacak; ana döngü yalnızca doku yükleyecek.
+            let jobs: Vec<(String, i32, i32)> = self
+                .waiters
+                .borrow()
+                .iter()
+                .filter_map(|(key, _)| Self::split_key(key, &url).map(|(w, h)| (key.clone(), w, h)))
+                .collect();
+            if jobs.is_empty() {
+                continue;
+            }
+
             self.active.set(active + 1);
             active += 1;
 
             let client = self.client.clone();
             let url2 = url.clone();
-            let (tx, rx) = std::sync::mpsc::channel::<(String, Option<Vec<u8>>)>();
-            std::thread::spawn(move || {
-                let _ = tx.send((url2, client.get_bytes(&url)));
-            });
+            let (tx, rx) = futures::channel::oneshot::channel::<Vec<(String, Option<ScaledCover>)>>();
 
             let this = self.clone_ref();
-            glib::idle_add_local(move || match rx.try_recv() {
-                Ok((u, bytes)) => {
-                    this.finish_cover(&u, bytes);
+            glib::MainContext::default().spawn_local(async move {
+                if let Ok(done) = rx.await {
+                    this.finish_cover(done);
                     let curr = this.active.get();
                     if curr > 0 {
                         this.active.set(curr - 1);
                     }
                     this.pump_covers();
-                    glib::ControlFlow::Break
                 }
-                Err(_) => glib::ControlFlow::Continue,
+            });
+
+            std::thread::spawn(move || {
+                let bytes = client.get_bytes(&url);
+                let done = match bytes {
+                    Some(b) => jobs
+                        .into_iter()
+                        .map(|(key, w, h)| {
+                            let scaled =
+                                Self::scale_pixbuf(&b, w, h).and_then(|pb| Self::pack_pixbuf(&pb));
+                            (key, scaled)
+                        })
+                        .collect(),
+                    // İndirilemedi: ölçek yok, anahtar "başarısız" olarak önbelleğe girer.
+                    None => jobs.into_iter().map(|(key, _, _)| (key, None)).collect(),
+                };
+                let _ = tx.send(done);
             });
         }
     }
 
-    fn finish_cover(&self, url: &str, bytes: Option<Vec<u8>>) {
+    /// Önbellek anahtarını "`url@WxH`" biçiminden boyutlara ayırır.
+    fn split_key(key: &str, url: &str) -> Option<(i32, i32)> {
+        let rest = key.strip_prefix(url)?.strip_prefix('@')?;
+        let (ws, hs) = rest.split_once('x')?;
+        Some((ws.parse().ok()?, hs.parse().ok()?))
+    }
+
+    fn pack_pixbuf(pb: &gdk_pixbuf::Pixbuf) -> Option<ScaledCover> {
+        let (w, h) = (pb.width(), pb.height());
+        let nch = pb.n_channels();
+        let stride = pb.rowstride() as usize;
+        let want = w as usize * nch as usize;
+        if want == 0 || h == 0 {
+            return None;
+        }
+        let px = pb.read_pixel_bytes();
+        let src = px.as_ref();
+        let mut data = Vec::with_capacity(want * h as usize);
+        for y in 0..h as usize {
+            let row = src.get(y * stride..y * stride + want)?;
+            data.extend_from_slice(row);
+        }
+        Some(ScaledCover {
+            w,
+            h,
+            nch,
+            stride: want as i32,
+            data,
+        })
+    }
+
+    fn finish_cover(&self, done: Vec<(String, Option<ScaledCover>)>) {
+        const TEX_CACHE_MAX: usize = 36;
+        let mut cache = self.cache.borrow_mut();
+        let mut order = self.cache_order.borrow_mut();
         let mut waiters = self.waiters.borrow_mut();
-        let mut keys_to_remove = Vec::new();
 
-        if let Some(b) = &bytes {
-            // Tüm doku önbelleğini birden temizlemek, görünür posterlerin
-            // yeniden decode edilmesine yol açıp sayfaları yavaşlatıyordu.
-            // Bunun yerine yalnızca fazla girdileri kademeli düşür.
-            // 96 doku ~200 MB tutuyordu; 40, bir sayfada görünen kart
-            // sayısının rahat üstü ve iki ekran geriye kadar yeterli.
-            const TEX_CACHE_MAX: usize = 40;
-            let mut cache = self.cache.borrow_mut();
-            while cache.len() > TEX_CACHE_MAX {
-                let Some(k) = cache.keys().next().cloned() else { break };
-                cache.remove(&k);
-            }
-
-            for (key, pics) in waiters.iter() {
-                let Some(rest) = key.strip_prefix(url) else { continue };
-                let Some(rest) = rest.strip_prefix('@') else { continue };
-                let Some((ws, hs)) = rest.split_once('x') else { continue };
-                let (Ok(w), Ok(h)) = (ws.parse::<i32>(), hs.parse::<i32>()) else { continue };
-                if let Some(t) = Self::scale_texture(b, w, h) {
+        for (key, scaled) in done {
+            let texture = scaled.and_then(|s| {
+                let bytes = glib::Bytes::from_owned(s.data);
+                let pb = gdk_pixbuf::Pixbuf::from_bytes(
+                    &bytes,
+                    gdk_pixbuf::Colorspace::Rgb,
+                    s.nch == 4,
+                    8,
+                    s.w,
+                    s.h,
+                    s.stride,
+                );
+                Some(gtk::gdk::Texture::for_pixbuf(&pb))
+            });
+            if let Some(t) = &texture {
+                if let Some(pics) = waiters.get(&key) {
                     for p in pics {
-                        p.set_paintable(Some(&t));
+                        p.set_paintable(Some(t));
                     }
-                    cache.insert(key.clone(), Some(t));
-                } else {
-                    cache.insert(key.clone(), None);
-                }
-                keys_to_remove.push(key.clone());
-            }
-        } else {
-            let mut cache = self.cache.borrow_mut();
-            for (key, _) in waiters.iter() {
-                if key.starts_with(url) {
-                    cache.insert(key.clone(), None);
-                    keys_to_remove.push(key.clone());
                 }
             }
+            if !cache.contains_key(&key) {
+                order.push_back(key.clone());
+            }
+            cache.insert(key.clone(), texture);
+            waiters.remove(&key);
         }
 
-        for k in keys_to_remove {
-            waiters.remove(&k);
+        while cache.len() > TEX_CACHE_MAX {
+            if let Some(old) = order.pop_front() {
+                cache.remove(&old);
+            } else {
+                break;
+            }
         }
     }
 }

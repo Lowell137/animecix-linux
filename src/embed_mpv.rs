@@ -610,6 +610,7 @@ impl Drop for MpvEmbed {
     fn drop(&mut self) {
         // RenderContext HER ZAMAN bundan önce düşürülmeli (sıralama kuralı).
         unsafe { libmpv_sys::mpv_terminate_destroy(self.ctx) };
+        eprintln!("[EMBED] mpv çekirdeği yok edildi (bellek serbest)");
     }
 }
 
