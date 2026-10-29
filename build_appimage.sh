@@ -72,6 +72,14 @@ publish_release() {
     echo "==> $asset bulunamadı, release atlanıyor."
     return 0
   fi
+  # Zorunlu imzalama: istemci tarafında doğrulama .sig asset'i olmadan güncellemeyi reddeder.
+  if [ ! -f "$asset.sig" ] || [ "$asset" -nt "$asset.sig" ]; then
+    echo "==> $asset imzalanıyor..."
+    bash "$(dirname "$0")/scripts/sign_update.sh" "$asset" || {
+      echo "==> İmzalama başarısız — release OLUŞTURULMADI (signed olmadan yayınlamayın)." >&2
+      return 1
+    }
+  fi
   echo "==> GitHub Release oluşturuluyor (v$VERSION)..."
   local resp
   resp=$(curl -sS -X POST \
@@ -94,12 +102,23 @@ publish_release() {
     -H "Content-Type: application/octet-stream" \
     --data-binary "@$asset" \
     "$upload_url?name=$asset&label=$asset" >/dev/null
+  echo "==> Asset yükleniyor: $asset.sig"
+  curl -sS -X POST \
+    -H "Authorization: Bearer $token" \
+    -H "Accept: application/vnd.github+json" \
+    -H "Content-Type: application/octet-stream" \
+    --data-binary "@$asset.sig" \
+    "$upload_url?name=$asset.sig&label=$asset.sig" >/dev/null
   echo "==> Release yayınlandı: https://github.com/$repo/releases/tag/v$VERSION"
 }
 
 # 1. Release derlemesi
 echo "==> cargo build --release çalıştırılıyor (v$VERSION)..."
 cargo build --release
+# CARGO_TARGET_DIR başka bir yere (örn. sandbox) ayarlandıysa binary oraya
+# düşer. `target/release` yolunu varsaymak eski binary'yi paketlerdi —
+# 1.3.5 oturumunda tam olarak bu oldu.
+BIN_SRC="${CARGO_TARGET_DIR:-$SCRIPT_DIR/target}/release/animecix"
 
 # 2. appimagetool kontrolü ve indirme
 APPIMAGETOOL=""
@@ -129,9 +148,16 @@ mkdir -p "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 mkdir -p "$APPDIR/usr/share/animecix/assets"
 
 # 4. Binary ve ikon/asset'leri kopyala
-cp target/release/animecix "$APPDIR/usr/bin/animecix"
+cp "$BIN_SRC" "$APPDIR/usr/bin/animecix"
+if [ ! -s "$APPDIR/usr/bin/animecix" ]; then
+    echo "HATA: $BIN_SRC yok veya boş — paketleme iptal." >&2
+    exit 1
+fi
+echo "==> Paketlenen binary: $BIN_SRC ($(stat -c %y "$BIN_SRC"))"
 if [ -d "assets" ]; then
-    cp -r assets/* "$APPDIR/usr/share/animecix/assets/"
+    # Gizli dosyalar (.mcp.json, .DS_Store vb.) pakete girmesin; cp -r bunları
+    # kopyalıyor ve izinli olmayan bir tanesi tüm adımı kesiyordu.
+    tar -C assets --exclude='.*' -cf - . | tar -C "$APPDIR/usr/share/animecix/assets" -xf -
 fi
 
 ICON_SRC="assets/hicolor/256x256/apps/tr.com.animecix.png"
@@ -147,8 +173,8 @@ fi
 cat > "$APPDIR/tr.com.animecix.desktop" <<EOF
 [Desktop Entry]
 Type=Application
-Name=AnimeciX
-Comment=Anime, dizi ve film izleme istemcisi
+Name=AnimeciX · MangaCiX
+Comment=Anime, manga, dizi ve film izleme istemcisi
 Exec=animecix
 Icon=tr.com.animecix
 Terminal=false

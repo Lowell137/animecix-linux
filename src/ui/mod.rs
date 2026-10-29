@@ -5,4 +5,5 @@ pub mod fansub_dialog;
 pub mod flashcard;
 pub mod info_views;
 pub mod row_menu;
+pub mod shortcuts;
 pub mod views;

@@ -5,11 +5,141 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 pub(crate) const BASE: &str = "https://animecix.tv";
+/// Manga bölümü. Anime `Episode`'inden ayrı: çevirmen var, `episode_number`
+/// kesirli olabiliyor (özel/ara bölümler), sayfa sayısı `episode_images`
+/// üzerinden hesaplanıyor.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MangaChapter {
+    #[serde(default)]
+    pub id: u64,
+    #[serde(default)]
+    pub number: f64,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub translator: String,
+    #[serde(default)]
+    pub release_date: String,
+    #[serde(default)]
+    pub page_count: usize,
+    /// MangaCiX'in `put-title` ucunun beklediği tam bölüm nesnesi.
+    /// Alanlar API sürümüne göre değişebildiği için ham JSON olarak tutulur.
+    #[serde(default)]
+    pub raw_episode: Option<serde_json::Value>,
+}
+
+/// Manga sayfası (görsel).
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MangaPage {
+    #[serde(default)]
+    pub id: String,
+    #[serde(default)]
+    pub episode_id: u64,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub width: u32,
+    #[serde(default)]
+    pub height: u32,
+}
+
+/// Manga modundaki "kaldığın yer": sunucu ve yerel geçmişteki bir manga kaydı.
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
+pub struct MangaHistory {
+    #[serde(default)]
+    pub title: Title,
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub poster: Option<String>,
+    /// Okunan son bölüm etiketi ("12. Bölüm" gibi).
+    #[serde(default)]
+    pub chapter_label: String,
+    #[serde(default)]
+    pub chapter_idx: usize,
+    /// Bölüm numarası. Özel/ara bölümlerde kesirli olabilir.
+    #[serde(default)]
+    pub chapter_number: f64,
+    #[serde(default)]
+    pub page: usize,
+    /// Unix epoch milliseconds.
+    #[serde(default)]
+    pub ts: u64,
+}
+
+/// Manga modunun taban adresi. AnimeciX ile aynı hesabı ve aynı API
+/// yüzeyini kullanıyor, yalnız taban adresi farklı.
+pub(crate) const MANGA_BASE: &str = "https://mangacix.net";
+
+/// MangaCiX içerik türleri (`/secure/titles?title_type=` değerleri).
+/// Ölçüldü (2026-09-30): manga 592, manhwa 189, manhua 22, novel 5,
+/// toplam 808. `type=` parametresi DEĞERİ YOK sayılıyor (her değer aynı
+/// 121 kayıt döndürüyordu) — gerçek filtre `title_type`.
+pub const MANGA_TYPES: &[(&str, &str)] = &[
+    ("manga", "Manga"),
+    ("manhwa", "Manhwa"),
+    ("manhua", "Manhua"),
+    ("novel", "Novel"),
+];
+
+/// MangaCiX keşfet sıralamaları. `desc`/`asc` sunucuda YOK sayılıyor
+/// (ölçüldü: ikisi de `views:desc` ile aynı ilk sayfayı döndürüyor), bu
+/// yüzden listelenenler sunucunun gerçekten ayırdığı alanlar.
+pub const MANGA_DISCOVER_ORDERS: &[(&str, &str)] = &[
+    ("Popülerlik", "views:desc"),
+    ("Kullanıcı Puanı", "mal_vote_average:desc"),
+    ("Yeni Eklenen", "created_at:desc"),
+    ("Son Güncellenen", "updated_at:desc"),
+    ("Yayın Tarihi (Yeni)", "release_date:desc"),
+    ("A-Z", "name"),
+];
+
+/// MangaCiX keşfet türleri (`genre=`). Sluglar boşluk içerirse %20 ile
+/// kodlanır; ölçülen toplamlar yorumda.
+pub const MANGA_DISCOVER_GENRES: &[(&str, &str)] = &[
+    ("Dram", "drama"),
+    ("Romantik", "romance"),
+    ("Aksiyon", "action"),
+    ("Komedi", "comedy"),
+    ("Fantezi", "fantasy"),
+    ("Macera", "adventure"),
+    ("Psikolojik", "psychological"),
+    ("Gizem", "mystery"),
+    ("Seinen", "seinen"),
+    ("Shoujo", "shoujo"),
+    ("İsekai", "isekai"),
+    ("Gerilim", "thriller"),
+    ("Korku", "horror"),
+    ("Bilim Kurgu", "sci-fi"),
+    ("Spor", "sports"),
+];
+
+/// MangaCiX keşfet anahtar sözcükleri (`keyword=`). MangaCiX'te tür
+/// havuzu MAL etiketlerinden geliyor; en ayırt edici olanlar seçildi
+/// (her biri ölçümde 0 < toplam < 808 döndürdü).
+pub const MANGA_DISCOVER_KEYWORDS: &[(&str, &str)] = &[
+    ("Okul", "school"),
+    ("Shounen", "shounen"),
+    ("Günlük Hayat", "slice%20of%20life"),
+    ("Erkek Protagonist", "male%20protagonist"),
+    ("Büyü", "magic"),
+    ("Doğaüstü", "supernatural"),
+    ("Külçe Alma", "reincarnation"),
+    ("İntikam", "revenge"),
+    ("Dövüş Sanatları", "martial%20arts"),
+    ("Zaman Yolculuğu", "time%20travel"),
+    ("Okul Kulübü", "school%20club"),
+    ("Fantastik Dünya", "fantasy%20world"),
+    ("Karanlık Fantastik", "dark%20fantasy"),
+    ("Vampir", "vampire"),
+    ("Hayalet", "ghost"),
+    ("Ejderha", "dragons"),
+];
 const TAU: &str = "https://tau-video.xyz";
 const API_TTL_SECS: u64 = 3 * 3600;
 const IMG_TTL_SECS: u64 = 7 * 24 * 3600;
 
-const MAX_IMG_CACHE_ENTRIES: usize = 150;
+const MAX_IMG_CACHE_ENTRIES: usize = 60;
 
 fn trim_img_cache(map: &mut HashMap<String, (u64, Vec<u8>)>) {
     if map.len() <= MAX_IMG_CACHE_ENTRIES {
@@ -96,7 +226,7 @@ where
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
- pub struct Title {
+pub struct Title {
     #[serde(default)]
     pub id: u64,
     #[serde(default)]
@@ -123,26 +253,100 @@ where
     pub rating: Option<f64>,
     #[serde(default)]
     pub backdrop: Option<String>,
+    /// MangaCiX `put-title` isteminde gönderilen API/Mongo künyesi.
+    /// Geçmişe yazarken web istemcisi gibi ham alanları korur; bölüm
+    /// koleksiyonları request builder tarafından değiştirilir.
+    #[serde(default)]
+    pub raw_title: Option<serde_json::Value>,
 }
 
 impl Title {
+    /// Kimlik + addan ibaret asgari başlık: diskindeki bir dosyayı oynatmak gibi,
+    /// künyeye ihtiyaç duymayan yollar için (poster/tür alanları boş kalır).
+    pub fn minimal(id: u64, name: &str) -> Title {
+        Title {
+            id,
+            name: name.to_string(),
+            year: None,
+            title_type: None,
+            poster: None,
+            description: None,
+            season_count: None,
+            genres: None,
+            runtime: None,
+            episode_count: None,
+            release_date: None,
+            rating: None,
+            backdrop: None,
+            raw_title: None,
+        }
+    }
+
+    /// Kullanıcı verisi uçları (geçmiş, watchlist) animecix.tv dışındaki
+    /// içerikleri de döndürebiliyor — aynı hesap altındaki MangaciX manga
+    /// kayıtları buraya `title_type` **boş** geliyor. Animecix'in kendi
+    /// uçlarında ise alan her başlıkta dolu (anime/movie), yani boşluk
+    /// güvenilir bir "bu bir anime değil" işaretidir.
+    pub fn is_anime_entry(r: &serde_json::Value) -> bool {
+        matches!(r["title_type"].as_str(), Some("anime") | Some("movie"))
+    }
+
     pub fn from_value(r: &serde_json::Value) -> Option<Title> {
+        if !Self::is_anime_entry(r) {
+            return None;
+        }
+        Self::from_value_lenient(r)
+    }
+
+    /// Tür filtresi uygulamadan başlığa çevirir. Manga girdilerinde
+    /// `title_type` boş geldiği için manga modu bunu kullanır.
+    pub fn from_value_lenient(r: &serde_json::Value) -> Option<Title> {
         let id = r["id"].as_u64().or_else(|| r["title_id"].as_u64())?;
         let tt = r["title_type"].as_str().unwrap_or("").to_string();
-        let genres = r["genres"].as_array().map(|arr| {
-            arr.iter()
-                .filter_map(|g| {
-                    if g.is_string() {
-                        g.as_str().map(|s| s.to_string())
-                    } else {
-                        g["display_name"]
-                            .as_str()
-                            .or_else(|| g["name"].as_str())
-                            .map(|s| s.to_string())
-                    }
+        let mut genres: Vec<String> = r["genres"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|g| {
+                        if g.is_string() {
+                            g.as_str().map(|s| s.to_string())
+                        } else {
+                            g["display_name"]
+                                .as_str()
+                                .or_else(|| g["name"].as_str())
+                                .map(|s| s.to_string())
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        // MangaCiX'te `genres` hep boş geliyor; tür bilgisi `keywords`
+        // dizisinde. Boş kalsaydı kartların alt satırı hiç görünmezdi.
+        // İlk 6 etiket yeterli (55 etiketlik kayıtlar var).
+        if genres.is_empty() {
+            genres = r["keywords"]
+                .as_array()
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|k| {
+                            k["display_name"]
+                                .as_str()
+                                .or_else(|| k["name"].as_str())
+                                .map(|s| {
+                                    let mut c = s.chars();
+                                    match c.next() {
+                                        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                                        None => String::new(),
+                                    }
+                                })
+                        })
+                        .take(6)
+                        .collect()
                 })
-                .collect()
-        });
+                .unwrap_or_default();
+        }
+        let genres = if genres.is_empty() { None } else { Some(genres) };
+        let raw_title = r.clone();
         Some(Title {
             id,
             name: r["name"].as_str().unwrap_or("").to_string(),
@@ -161,6 +365,7 @@ impl Title {
                 .or_else(|| r["local_vote_average"].as_f64().filter(|v| *v > 0.0))
                 .or_else(|| r["tmdb_vote_average"].as_f64().filter(|v| *v > 0.0)),
             backdrop: r["backdrop"].as_str().map(|s| s.to_string()),
+            raw_title: Some(raw_title),
         })
     }
 
@@ -205,14 +410,23 @@ impl Title {
         t.to_string()
     }
 
-    pub fn genre_line(&self) -> Option<String> {
-        let gens = self.genres.as_ref()?;
+    /// Çevrilmiş, tekilleştirilmiş, "Animasyon" elenmiş tür etiketleri (çip için).
+    pub fn genre_chips(&self) -> Vec<String> {
+        let gens = match self.genres.as_ref() {
+            Some(g) => g,
+            None => return Vec::new(),
+        };
         let mut parts: Vec<String> = gens
             .iter()
             .map(|g| Self::tr_genre(g))
             .filter(|g| g != "Animasyon")
             .collect();
         parts.dedup();
+        parts
+    }
+
+    pub fn genre_line(&self) -> Option<String> {
+        let parts = self.genre_chips();
         if parts.is_empty() {
             None
         } else {
@@ -256,6 +470,12 @@ impl Title {
             self.title_type.as_deref().map(|t| match t {
                 "anime" => "Anime Serisi",
                 "movie" => "Film",
+                // Manga modundaki türler; MangaCiX bunları `title_type`
+                // olarak aynı alanda taşıyor.
+                "manga" => "Manga",
+                "manhwa" => "Manhwa",
+                "manhua" => "Manhua",
+                "novel" => "Novel",
                 _ => "Dizi",
             }.to_string()),
             self.season_count.map(|s| format!("{s} Sezon")),
@@ -264,6 +484,44 @@ impl Title {
         .flatten()
         .collect();
         parts.join("  •  ")
+    }
+
+    /// Detay başlığındaki dikey künye bloğu: (etiket, değer) — yalnızca veri varsa.
+    pub fn detail_rows(&self) -> Vec<(String, String)> {
+        let mut rows: Vec<(String, String)> = Vec::new();
+        let type_lbl = match self.title_type.as_deref() {
+            Some("anime") => Some("TV"),
+            Some("movie") => Some("Film"),
+            // Manga modu türleri; MangaCiX aynı alanda taşıyor.
+            Some("manga") => Some("Manga"),
+            Some("manhwa") => Some("Manhwa"),
+            Some("manhua") => Some("Manhua"),
+            Some("novel") => Some("Novel"),
+            Some(other) if !other.is_empty() => Some("Dizi"),
+            _ => None,
+        };
+        if let Some(t) = type_lbl {
+            rows.push(("Tür".into(), t.into()));
+        }
+        if let Some(y) = self.year {
+            rows.push(("Yıl".into(), y.to_string()));
+        }
+        if let Some(ec) = self.episode_count {
+            if ec > 0 {
+                rows.push(("Bölüm".into(), ec.to_string()));
+            }
+        }
+        if let Some(rt) = self.runtime {
+            if rt > 0 {
+                rows.push(("Süre".into(), format!("{rt} dk")));
+            }
+        }
+        if let Some(rd) = &self.release_date {
+            if let Some(d) = Self::fmt_release_date(rd) {
+                rows.push(("Yayın".into(), d));
+            }
+        }
+        rows
     }
 }
 
@@ -531,6 +789,16 @@ pub struct State {
     pub saved: Vec<Title>,
     #[serde(default)]
     pub history: Vec<HistoryEntry>,
+    /// Yerel manga okuma konumu. Sunucu kaydı kullanılamadığında ya da ağ
+    /// yanıt vermediğinde kaldığın yer korunur. Sunucudakilerle birleştirilir.
+    /// Anime geçmişi `history` alanında durur — iki mod karışmaz.
+    #[serde(default)]
+    pub manga_history: Vec<MangaHistory>,
+    /// MangaCiX'te geçmiş silme ucu olmadığı için "listeden gizle" için
+    /// tutulan title id listesi. Sunucudaki kayıt SİLİNMEZ, yalnızca
+    /// uygulamada görünmez.
+    #[serde(default)]
+    pub manga_history_hidden: Vec<u64>,
     #[serde(default)]
     pub welcome_seen: bool,
     #[serde(default)]
@@ -545,6 +813,97 @@ pub struct State {
     pub marathon: Vec<MarathonItem>,
     #[serde(default)]
     pub preferred_source: HashMap<String, String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum MangaReadingMode {
+    RightToLeft,
+    LeftToRight,
+    Vertical,
+    Webtoon,
+}
+
+impl MangaReadingMode {
+    pub const ALL: [MangaReadingMode; 4] = [
+        MangaReadingMode::RightToLeft,
+        MangaReadingMode::LeftToRight,
+        MangaReadingMode::Vertical,
+        MangaReadingMode::Webtoon,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::RightToLeft => "Sağdan Sola (Manga)",
+            Self::LeftToRight => "Soldan Sağa (Çizgi Roman)",
+            Self::Vertical => "Dikey (Tek Sayfa)",
+            Self::Webtoon => "Webtoon (Sürekli Akış)",
+        }
+    }
+
+    pub fn icon_name(&self) -> &'static str {
+        match self {
+            Self::RightToLeft => "go-previous-symbolic",
+            Self::LeftToRight => "go-next-symbolic",
+            Self::Vertical => "go-down-symbolic",
+            Self::Webtoon => "view-paged-symbolic",
+        }
+    }
+}
+
+impl Default for MangaReadingMode {
+    fn default() -> Self {
+        Self::RightToLeft
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum MangaScaling {
+    /// Pencere genişliğine göre ölçekler, ama dikeyde viewport'a sığar.
+    FitWidth,
+    /// Tüm sayfayı pencereye sığdırır — varsayılan.
+    #[default]
+    FitScreen,
+}
+
+impl MangaScaling {
+    pub const ALL: [MangaScaling; 2] = [
+        MangaScaling::FitScreen,
+        MangaScaling::FitWidth,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::FitWidth => "Genişliğe Sığdır (Büyük Panel)",
+            Self::FitScreen => "Ekrana Sığdır (Tam Sayfa)",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum MangaBackground {
+    #[default]
+    System,
+    Black,
+    White,
+}
+
+impl MangaBackground {
+    pub const ALL: [MangaBackground; 3] = [
+        MangaBackground::System,
+        MangaBackground::Black,
+        MangaBackground::White,
+    ];
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::System => "Sistem Stili",
+            Self::Black => "Siyah",
+            Self::White => "Beyaz",
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -571,6 +930,39 @@ pub struct Settings {
     pub upscale: String,
     #[serde(default)]
     pub light_mode: bool,
+    /// Anime modu mu manga modu mu. Kalıcı: uygulama yeniden açılınca
+    /// kaldığı modda başlar.
+    #[serde(default)]
+    pub manga_mode: bool,
+    /// Okuyucuda otomatik sayfa geçişi, saniye. 0 = kapalı.
+    #[serde(default)]
+    pub manga_auto_advance_secs: u64,
+    /// Okuma modu: Sağdan Sola (Manga), Soldan Sağa, Dikey, Webtoon.
+    #[serde(default)]
+    pub manga_reading_mode: MangaReadingMode,
+    /// Webtoon şerit genişliği (piksel). Varsayılan 800.
+    #[serde(default = "default_webtoon_width")]
+    pub webtoon_width: i32,
+    /// Okuyucuda sayfa numarasını göster.
+    #[serde(default = "default_true")]
+    pub manga_show_page_number: bool,
+    /// Okuyucuda sayfa sığdırma: Genişliğe (büyük paneller) veya Ekrana.
+    #[serde(default)]
+    pub manga_scaling: MangaScaling,
+    /// Okuyucu arka planı: Sistem | Siyah | Beyaz.
+    #[serde(default)]
+    pub manga_background: MangaBackground,
+    /// Görüntü filtreleri (1.0 = dokunulmaz). CSS `filter` ile uygulanır.
+    #[serde(default = "default_unity")]
+    pub manga_brightness: f32,
+    #[serde(default = "default_unity")]
+    pub manga_contrast: f32,
+    #[serde(default = "default_unity")]
+    pub manga_saturation: f32,
+    #[serde(default)]
+    pub manga_grayscale: bool,
+    #[serde(default)]
+    pub manga_sepia: bool,
     #[serde(default = "default_patience")]
     pub source_patience_secs: u64,
     #[serde(default)]
@@ -579,18 +971,34 @@ pub struct Settings {
     pub fansub_ask_each_time: bool,
     #[serde(default)]
     pub download_dir: Option<String>,
+    /// Dosya başına eşzamanlı indirme bağlantısı/segment sayısı (aria2c `-s`, iç motor `-x`).
+    #[serde(default = "default_connections")]
+    pub download_connections: u32,
     #[serde(default = "default_true")]
     pub local_history_enabled: bool,
     #[serde(default = "default_ui_scale")]
     pub ui_scale: f32,
-    #[serde(default)]
-    pub sidebar_collapsed: bool,
+    /// Sidebar'da gösterilecek sekme anahtarları. Ana sayfa daima korunur.
+    #[serde(default = "default_sidebar_visible")]
+    pub sidebar_visible: Vec<String>,
     #[serde(default = "default_false")]
     pub focus_mode: bool,
+    /// Bölüm sayfasında ızgara görünümü açık mı.
+    #[serde(default)]
+    pub episodes_grid_view: bool,
     #[serde(default = "default_true")]
     pub auto_next_episode: bool,
     #[serde(default = "default_false")]
     pub welcome_seen: bool,
+    /// İzlenmemiş bölümlerin bannerları spoiler için bulanıklaştırılır.
+    #[serde(default = "default_true")]
+    pub blur_unwatched: bool,
+    /// Anime/film detay sayfası, banner vurgu renklerinden gradyan fon kullanır.
+    #[serde(default = "default_true")]
+    pub gradient_bg: bool,
+    /// Detay sayfası hero'sunda buzlu cam (yarı saydam + noise) katmanı.
+    #[serde(default = "default_true")]
+    pub frosted_glass: bool,
 }
 fn default_loading() -> String { "overlay".into() }
 fn default_quick_search() -> bool { true }
@@ -601,6 +1009,15 @@ fn default_false() -> bool { false }
 fn default_upscale() -> String { "hafif".into() }
 fn default_patience() -> u64 { 20 }
 fn default_ui_scale() -> f32 { 1.0 }
+fn default_connections() -> u32 { 6 }
+fn default_sidebar_visible() -> Vec<String> {
+    ["home", "kesfet", "favs", "marathon", "history", "calendar", "news", "downloads"]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+}
+fn default_webtoon_width() -> i32 { 800 }
+fn default_unity() -> f32 { 1.0 }
 
 /// Maraton özet kartı için (tamamlanan_sayısı, yüzde) hesaplar.
 /// Girdi: her yapımın 0.0-1.0 arası ilerleme oranı.
@@ -618,55 +1035,47 @@ pub fn marathon_summary(fracs: &[f64]) -> (usize, u32) {
 
 /// Upscale için mpv argümanlarını üretir.
 ///
-/// `video_height` biliniyorsa (mpv açılmadan önceki metadata) akıllı skip uygular:
-///   - video >= 1080p ise shader (hafif/ultra/hafif_keskin) GPU'yu boşa yakar,
-///     sadece hafif_keskin ise unsharp vf uygulanır (shader atlanır).
-///   - video < 1080p ise normal akış: shader + unsharp.
+/// `output_height`, karenin en son gösterileceği yüksekliktir — genelde
+/// monitörün dikey çözünürlüğü. Kaynak zaten bu çözünürlüğe ulaşıyorsa
+/// x2 upscale saf iş yüküdür: 4 kat piksel hesaplanır, 3/4'ü panele
+/// sığmayıp atılır. O durumda shader atlanır; `hafif_keskin` keskinliği
+/// unsharp ile korur, `hafif`/`ultra` argüman üretmez.
+///
+/// Kaynak yüksekliği mpv dosyayı açmadan bilinmez (`video-params/h` ancak
+/// sonra dolar), bu yüzden harici oynatıcıda çıktı çözünürlüğüne bakılır.
 pub(crate) fn upscale_mpv_args(
     upscale: &str,
     shader_path: Option<&str>,
-    video_height: Option<u32>,
+    output_height: Option<u32>,
 ) -> Vec<String> {
-    let skip_shader = matches!(video_height, Some(h) if h >= 1080)
-        && matches!(upscale, "hafif" | "ultra" | "hafif_keskin");
+    // ponytail: monitör 1080p'yse x2 upscale her kaynakta boşa iş —
+    // yalnız 480p içerikte Anime4K hafif fark yaratırdı. 4K panele
+    // geçince ya da kaynak yüksekliği bilinir olunca kural gözden geçirilir.
+    let skip_shader = matches!(output_height, Some(h) if h >= 1080);
 
     match upscale {
         "sharp" => vec![
             "--scale=ewa_lanczossharp".into(),
             "--cscale=ewa_lanczossharp".into(),
         ],
-        "hafif" => {
+        "hafif" | "ultra" => {
             if skip_shader {
                 Vec::new()
             } else {
-                match shader_path {
-                    Some(p) => vec![format!("--glsl-shaders={p}")],
-                    None => Vec::new(),
-                }
-            }
-        }
-        "ultra" => {
-            if skip_shader {
-                Vec::new()
-            } else {
-                match shader_path {
-                    Some(p) => vec![format!("--glsl-shaders={p}")],
-                    None => Vec::new(),
-                }
+                shader_path
+                    .map(|p| vec![format!("--glsl-shaders={p}")])
+                    .unwrap_or_default()
             }
         }
         "hafif_keskin" => {
-            if skip_shader {
-                vec!["--vf=unsharp=5:5:1.0:5:5:0.4".into()]
-            } else {
-                match shader_path {
-                    Some(p) => vec![
-                        format!("--glsl-shaders={p}"),
-                        "--vf=unsharp=5:5:1.0:5:5:0.4".into(),
-                    ],
-                    None => vec!["--vf=unsharp=5:5:1.0:5:5:0.4".into()],
+            let mut v = Vec::new();
+            if !skip_shader {
+                if let Some(p) = shader_path {
+                    v.push(format!("--glsl-shaders={p}"));
                 }
             }
+            v.push("--vf=unsharp=5:5:1.0:5:5:0.4".into());
+            v
         }
         _ => Vec::new(),
     }
@@ -686,16 +1095,33 @@ impl Default for Settings {
             embedded_player: default_true(),
             upscale: default_upscale(),
             light_mode: false,
+            manga_mode: false,
+            manga_auto_advance_secs: 0,
+            manga_reading_mode: MangaReadingMode::default(),
+            webtoon_width: default_webtoon_width(),
+            manga_show_page_number: true,
+            manga_scaling: MangaScaling::default(),
+            manga_background: MangaBackground::default(),
+            manga_brightness: 1.0,
+            manga_contrast: 1.0,
+            manga_saturation: 1.0,
+            manga_grayscale: false,
+            manga_sepia: false,
             source_patience_secs: default_patience(),
             default_fansub_template: None,
             fansub_ask_each_time: true,
             download_dir: None,
+            download_connections: default_connections(),
             local_history_enabled: default_true(),
             ui_scale: default_ui_scale(),
-            sidebar_collapsed: false,
+            sidebar_visible: default_sidebar_visible(),
             focus_mode: false,
+            episodes_grid_view: false,
             auto_next_episode: true,
             welcome_seen: false,
+            blur_unwatched: true,
+            gradient_bg: true,
+            frosted_glass: true,
         }
     }
 }
@@ -819,6 +1245,18 @@ pub fn check_internet() -> InternetStatus {
         pub title_type: Option<String>,
         pub order: Option<String>,
         pub only_streamable: bool,
+        pub page: u32,
+    }
+
+    /// MangaCiX keşfet filtresi. `title_types` boşsa tüm katalog.
+    /// `genres`/`keywords` virgülle AND edilir (ölçüldü: drama+romance
+    /// 304, drama 496), `title_types` virgülle birleşir (781).
+    #[derive(Clone, Debug, Default)]
+    pub struct MangaDiscoverFilter {
+        pub title_types: Vec<String>,
+        pub genres: Vec<String>,
+        pub keywords: Vec<String>,
+        pub order: Option<String>,
         pub page: u32,
     }
 
@@ -1023,6 +1461,25 @@ impl Client {
         h
     }
 
+    /// Bellekteki JSON önbelleğine yazar ve boyutu sabit tutar.
+    /// Sınırsız büyüme uzun gezinme sonrası yüzlerce MB RAM biriktiriyordu.
+    fn cache_put(&self, key: &str, ts: u64, v: serde_json::Value) {
+        const MEM_API_MAX: usize = 24;
+        let mut m = self.cache.lock().unwrap();
+        m.insert(key.to_string(), (ts, v));
+        if m.len() > MEM_API_MAX {
+            let mut oldest: Vec<(u64, String)> = m
+                .iter()
+                .map(|(k, (t, _))| (*t, k.clone()))
+                .collect();
+            oldest.sort_unstable_by_key(|(t, _)| *t);
+            let over = m.len() - MEM_API_MAX;
+            for (_, k) in oldest.into_iter().take(over) {
+                m.remove(&k);
+            }
+        }
+    }
+
     fn cache_fetch(
         &self,
         key: &str,
@@ -1045,7 +1502,7 @@ impl Client {
 
         if let Some((t, v)) = self.disk_api_load(key) {
             if now.saturating_sub(t) < ttl {
-                self.cache.lock().unwrap().insert(key.to_string(), (t, v.clone()));
+                self.cache_put(key, t, v.clone());
                 return Ok(v);
             }
             let stale = v.clone();
@@ -1056,12 +1513,12 @@ impl Client {
             }
             match net_res {
                 Ok(fresh) => {
-                    self.cache.lock().unwrap().insert(key.to_string(), (now, fresh.clone()));
+                    self.cache_put(key, now, fresh.clone());
                     self.disk_api_save(key, now, &fresh);
                     return Ok(fresh);
                 }
                 Err(_) => {
-                    self.cache.lock().unwrap().insert(key.to_string(), (now, stale.clone()));
+                    self.cache_put(key, now, stale.clone());
                     return Ok(stale);
                 }
             }
@@ -1072,7 +1529,7 @@ impl Client {
         if std::env::var_os("ANIMECIX_BENCH").is_some() {
             eprintln!("[bench] api {key} -> {:.1?}ms", t0.elapsed());
         }
-        self.cache.lock().unwrap().insert(key.to_string(), (now, v.clone()));
+        self.cache_put(key, now, v.clone());
         self.disk_api_save(key, now, &v);
         Ok(v)
     }
@@ -1094,9 +1551,7 @@ impl Client {
                 let mut items = Vec::new();
                 if let Some(arr) = lst["items"].as_array() {
                     for it in arr {
-                        let t = it["title_type"].as_str().unwrap_or("");
-                        let m = it["model_type"].as_str().unwrap_or("");
-                        if t != "anime" && t != "movie" && m != "title" {
+                        if !Title::is_anime_entry(it) {
                             continue;
                         }
                         if it["id"].as_u64().or_else(|| it["title_id"].as_u64()).is_some() {
@@ -1117,10 +1572,312 @@ impl Client {
         Ok(cats)
     }
 
-    pub fn search(&self, q: &str) -> Result<Vec<Title>, String> {
-        let key = format!("search:{q}");
+    /// Manga modunun "son bölümler" şeridi.
+    ///
+    /// MangaCiX'in kendi ana sayfası `lists-guests` kullanmıyor; iki kaynaktan
+    /// kuruluyor: `/secure/last-episodes` ve `/secure/titles?order=desc`.
+    /// Alan yapısı anime ile birebir aynı, tek fark taban adresi.
+    pub fn manga_last_episodes(&self, page: u32) -> Result<(Vec<LastEpisode>, usize, u32), String> {
+        let page = page.max(1);
+        let key = format!("manga_lastep:{page}");
+        let d = self.cache_get(&key, 900, |http| {
+            http.get(format!("{MANGA_BASE}/secure/last-episodes"))
+                .header("Accept", "application/json")
+                .query(&[("page", &page.to_string())])
+                .send()
+                .map_err(|e| e.to_string())?
+                .error_for_status()
+                .map_err(|e| e.to_string())?
+                .json()
+                .map_err(|e| e.to_string())
+        })?;
+        let total = d["total"].as_u64().unwrap_or(0) as usize;
+        let last = d["last_page"].as_u64().unwrap_or(1).max(1) as u32;
+        // Son bölümler ucu iki türü karışık döndürüyor (Solo Leveling gibi
+        // anime'ler de geliyor). Manga modunda yalnız manga türleri tutulur;
+        // türü boş olan atlanır çünkü hangisi olduğu belli değil.
+        const MANGA: [&str; 4] = ["manga", "manhwa", "manhua", "novel"];
+        let mut out = Vec::new();
+        if let Some(arr) = d["data"].as_array() {
+            for e in arr {
+                if !MANGA.contains(&e["title_type"].as_str().unwrap_or("")) {
+                    continue;
+                }
+                out.push(LastEpisode {
+                    title_id: Self::u64_field(e, "title_id"),
+                    title_name: Self::str_field(e, "title_name"),
+                    title_poster: e["title_poster"]
+                        .as_str()
+                        .map(|x| x.trim().to_string())
+                        .filter(|x| !x.is_empty()),
+                    title_type: e["title_type"].as_str().map(|x| x.to_string()),
+                    season: Self::u64_field(e, "season_number"),
+                    episode: Self::u64_field(e, "episode_number"),
+                    release_date: Self::str_field(e, "release_date"),
+                });
+            }
+        }
+        Ok((out, total, last))
+    }
+
+    /// MangaCiX keşfet sorgu dizesi. Sluglar KODLANMIŞ gelir (`%20`);
+    /// `title_types` birleşik, `genres`/`keywords` AND.
+    ///
+    /// Ölçülen sunucu davranışı (2026-09-30): `type=` değeri yok sayılıyor,
+    /// gerçek tür filtresi `title_type`.
+    pub(crate) fn manga_query(f: &MangaDiscoverFilter) -> String {
+        let mut q = String::new();
+        let mut push = |k: &str, v: &str| {
+            if !q.is_empty() {
+                q.push('&');
+            }
+            q.push_str(k);
+            q.push('=');
+            q.push_str(v);
+        };
+        if !f.title_types.is_empty() {
+            push("title_type", &f.title_types.join(","));
+        }
+        if !f.genres.is_empty() {
+            push("genre", &f.genres.join(","));
+        }
+        if !f.keywords.is_empty() {
+            push("keyword", &f.keywords.join(","));
+        }
+        if let Some(o) = &f.order {
+            push("order", o);
+        }
+        push("page", &f.page.max(1).to_string());
+        push("perPage", "40");
+        q
+    }
+
+    /// MangaCiX keşfi: `/secure/titles` + X-E-H imzası. `perPage=40`.
+    pub fn manga_discover(
+        &self,
+        f: &MangaDiscoverFilter,
+    ) -> Result<(Vec<Title>, usize, u32), String> {
+        let q = Self::manga_query(f);
+        let key = format!("manga_disc:{q}");
+        let d = self.cache_get(&key, 900, |http| {
+            let sig = crate::xeh::sign_query(&q)?;
+            http.get(format!("{MANGA_BASE}/secure/titles?{q}"))
+                .header("Accept", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("X-E-H", &sig)
+                .send()
+                .map_err(|e| e.to_string())?
+                .error_for_status()
+                .map_err(|e| e.to_string())?
+                .json()
+                .map_err(|e| e.to_string())
+        })?;
+        let pg = if d["pagination"].is_object() { &d["pagination"] } else { &d };
+        let total = pg["total"]
+            .as_u64()
+            .or_else(|| pg["totalData"].as_u64())
+            .unwrap_or(0) as usize;
+        let last = pg["last_page"]
+            .as_u64()
+            .or_else(|| pg["lastPage"].as_u64())
+            .unwrap_or(1)
+            .max(1) as u32;
+        let mut out = Vec::new();
+        if let Some(arr) = pg["data"]
+            .as_array()
+            .or_else(|| pg["items"].as_array())
+            .or_else(|| pg["titles"].as_array())
+        {
+            for v in arr {
+                if let Some(mut t) = Title::from_value_lenient(v) {
+                    if t.title_type.is_none() {
+                        t.title_type = Some("manga".into());
+                    }
+                    out.push(t);
+                }
+            }
+        }
+        Ok((out, total, last))
+    }
+
+    /// Manga detayı: künye + bölümler + sayfalar.
+    ///
+    /// `episodes` ve `episode_images` alanları YALNIZCA imzalı istekte geliyor;
+    /// imzasız istek boş başlık döndürüyor (ölçüldü: 0 bölüm). Sayfalar
+    /// `episode_id` ile bölümlere bağlanıyor.
+    pub fn manga_detail(
+        &self,
+        id: u64,
+    ) -> Result<(Title, Vec<MangaChapter>, Vec<MangaPage>), String> {
+        let key = format!("manga_detail:{id}");
+        let t0 = std::time::Instant::now();
+        let d = self.cache_get(&key, 900, |http| {
+            let sig = crate::xeh::sign_query("")?;
+            http.get(format!("{MANGA_BASE}/secure/titles/{id}"))
+                .header("Accept", "application/json")
+                .header("X-Requested-With", "XMLHttpRequest")
+                .header("X-E-H", &sig)
+                .send()
+                .map_err(|e| e.to_string())?
+                .error_for_status()
+                .map_err(|e| e.to_string())?
+                .json()
+                .map_err(|e| e.to_string())
+        })?;
+        let raw = &d["title"];
+        let mut t = Title::from_value_lenient(raw).ok_or("Manga künyesi okunamadı")?;
+        if t.title_type.is_none() {
+            t.title_type = Some("manga".into());
+        }
+        // Web, başlığın tam ham bölüm/katalog snapshot'ını HistoryTitle'a
+        // kopyalıyor; create sırasında yalnız geçiş alanlarını sıfırlıyor.
+        // State'e büyük bir katalog kopyalamamak için detayda bu alanlar
+        // sonradan hafifletilir.
+        let mut raw_title = raw.clone();
+
+        let mut chapters: Vec<MangaChapter> = raw["episodes"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|e| MangaChapter {
+                        id: Self::u64_field(e, "id"),
+                        number: e["episode_number"].as_f64().unwrap_or(0.0),
+                        name: Self::str_field(e, "name"),
+                        translator: e["translators"]
+                            .as_array()
+                            .and_then(|a| a.first())
+                            .and_then(|x| {
+                                x["translatorDetails"]["translator"]
+                                    .as_str()
+                                    .map(|s| s.to_string())
+                                    .or_else(|| {
+                                        x["translatorDetails"]["name"].as_str().map(|s| s.to_string())
+                                    })
+                            })
+                            .unwrap_or_default(),
+                        release_date: Self::str_field(e, "release_date"),
+                        page_count: 0,
+                        raw_episode: Some(e.clone()),
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        chapters.sort_by(|a, b| {
+            a.number
+                .partial_cmp(&b.number)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let pages: Vec<MangaPage> = raw["episode_images"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .map(|p| MangaPage {
+                        id: Self::str_field(p, "id"),
+                        episode_id: Self::u64_field(p, "episode_id"),
+                        url: Self::str_field(p, "url"),
+                        width: p["width"].as_u64().unwrap_or(0) as u32,
+                        height: p["height"].as_u64().unwrap_or(0) as u32,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        for c in chapters.iter_mut() {
+            c.page_count = pages.iter().filter(|p| p.episode_id == c.id).count();
+        }
+        eprintln!(
+            "[MANGA/DETAY] {} bölüm, {} sayfa, {:?} (önbellek anahtarı {key})",
+            chapters.len(),
+            pages.len(),
+            t0.elapsed()
+        );
+        if let Some(obj) = raw_title.as_object_mut() {
+            obj.remove("episode_images");
+            obj.remove("videos");
+            obj.remove("season");
+            obj.remove("seasons");
+        }
+        t.raw_title = Some(raw_title);
+
+        Ok((t, chapters, pages))
+    }
+
+    /// Bir bölümün sayfaları, sıra korunarak.
+    pub fn manga_pages_of(pages: &[MangaPage], chapter: &MangaChapter) -> Vec<MangaPage> {
+        pages
+            .iter()
+            .filter(|p| p.episode_id == chapter.id)
+            .cloned()
+            .collect()
+    }
+
+    /// MangaCiX web istemcisinin `secure/history/put-title` gövdesi.
+    ///
+    /// Yeni bir geçmiş satırı açmak için `videos` yerine tam bir bölüm
+    /// nesnesi `episodes[0]` içinde gider. Web istemcisi title/episode
+    /// nesnelerinin tüm ham alanlarını korur; ikisi için de transition
+    /// alanlarını (`season`, `seasons`, `videos`, `episode_images`) sıfırlar.
+    pub fn manga_history_put_body(
+        title: &Title,
+        chapter: &MangaChapter,
+        date_ms: u64,
+    ) -> serde_json::Value {
+        let mut body = title.raw_title.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "id": title.id,
+                "name": title.name,
+                "title_type": title.title_type.as_deref().unwrap_or("manga"),
+                "poster": title.poster,
+            })
+        });
+        let Some(obj) = body.as_object_mut() else {
+            return serde_json::json!({});
+        };
+
+        obj.entry("id").or_insert_with(|| serde_json::json!(title.id));
+        obj.entry("name").or_insert_with(|| serde_json::json!(title.name));
+        obj.entry("title_type").or_insert_with(|| {
+            serde_json::json!(title.title_type.as_deref().unwrap_or("manga"))
+        });
+        obj.entry("poster").or_insert_with(|| {
+            serde_json::json!(title.poster.clone().unwrap_or_default())
+        });
+        obj.insert("season".into(), serde_json::Value::Null);
+        obj.insert("seasons".into(), serde_json::Value::Null);
+        obj.insert("videos".into(), serde_json::json!([]));
+        obj.insert("episode_images".into(), serde_json::json!([]));
+
+        let mut episode = chapter.raw_episode.clone().unwrap_or_else(|| {
+            serde_json::json!({
+                "id": chapter.id,
+                "title_id": title.id,
+                "episode_number": chapter.number,
+                "name": chapter.name,
+                "release_date": chapter.release_date,
+            })
+        });
+        if let Some(ep) = episode.as_object_mut() {
+            ep.entry("id").or_insert_with(|| serde_json::json!(chapter.id));
+            ep.entry("title_id").or_insert_with(|| serde_json::json!(title.id));
+            ep.entry("episode_number")
+                .or_insert_with(|| serde_json::json!(chapter.number));
+            ep.entry("name").or_insert_with(|| serde_json::json!(chapter.name));
+            ep.entry("release_date")
+                .or_insert_with(|| serde_json::json!(chapter.release_date));
+        }
+        obj.insert("episodes".into(), serde_json::json!([episode]));
+        obj.insert("date".into(), serde_json::json!(date_ms));
+        body
+    }
+
+    pub fn search(&self, q: &str, manga: bool) -> Result<Vec<Title>, String> {
+        // Manga modunda arama mangacix.net'e gider; aynı uç yolu, farklı
+        // taban adresi ve manga tür filtresi yok (sunucu kendi türünde döner).
+        let base = if manga { MANGA_BASE } else { BASE };
+        let key = format!("{}:search:{q}", if manga { "manga" } else { "anime" });
+        let url = format!("{base}/secure/search/{}", q);
         let d = self.cache_get(&key, 300, |http| {
-            http.get(format!("{BASE}/secure/search/{}", q))
+            http.get(&url)
                 .header("Accept", "application/json")
                 .query(&[("limit", "20")])
                 .send()
@@ -1133,7 +1890,17 @@ impl Client {
         let mut out = Vec::new();
         if let Some(results) = d["results"].as_array() {
             for r in results {
-                if let Some(t) = Title::from_value(r) {
+                // Manga modunda tür filtresi yok; anime modunda anime filtresi
+                // var ama sunucu anime dışını karışık dönebiliyor.
+                let t = if manga {
+                    Title::from_value_lenient(r)
+                } else {
+                    Title::from_value(r)
+                };
+                if let Some(mut t) = t {
+                    if manga && t.title_type.is_none() {
+                        t.title_type = Some("manga".into());
+                    }
                     out.push(t);
                 }
             }
@@ -1154,13 +1921,13 @@ impl Client {
                 }
             }
         }
-        if let Ok(results) = self.search(&t.id.to_string()) {
+        if let Ok(results) = self.search(&t.id.to_string(), false) {
             if let Some(src) = results.into_iter().find(|x| x.id == t.id) {
                 return src;
             }
         }
         if !t.name.is_empty() {
-            if let Ok(results) = self.search(&t.name) {
+            if let Ok(results) = self.search(&t.name, false) {
                 if let Some(src) = results.into_iter().find(|x| x.id == t.id) {
                     return src;
                 }
@@ -1602,6 +2369,102 @@ impl Client {
             if candidates.len() >= 8 { break; }
         }
         Ok(candidates)
+    }
+
+    /// Bölüm kaynaklarının (embed url → kalite etiketi) haritası.
+    /// `episode_points` önbelleğini (30dk) kullanır; etiket "1080p"/"720p"/"480p"/"en iyi" vb.
+    /// Oynatıcıdaki "Kalite" listesinde her kaynağın gerçek çözünürlüğünü göstermek için.
+    pub fn episode_quality_map(
+        &self,
+        title_id: u64,
+        episode: u64,
+        season: u64,
+    ) -> HashMap<String, String> {
+        let d = self.episode_points(title_id, episode, season);
+        let mut m = HashMap::new();
+        if let Some(videos) = d["videos"].as_array() {
+            for v in videos {
+                if let (Some(u), Some(q)) = (v["url"].as_str(), v["quality"].as_str()) {
+                    let q = q.trim();
+                    if !u.is_empty() && !q.is_empty() {
+                        m.entry(u.to_string()).or_insert_with(|| q.to_string());
+                    }
+                }
+            }
+        }
+        m
+    }
+
+    /// Bir embed adresinin (tau-video ise) SUNDUĞU EN YÜKSEK çözünürlük etiketi
+    /// ("1080p" gibi). tau değilse veya çözülemezse None — yani o kaynağın
+    /// çözünürlüğü ağdan ucuzca bilinemez (dood/Kaynak tek akış verir).
+    pub fn embed_max_quality(&self, embed_url: &str) -> Option<String> {
+        let (embed_id, vid) = parse_tau_embed(embed_url)?;
+        let mut url = format!("{TAU}/api/video/{embed_id}");
+        if !vid.is_empty() {
+            url.push_str(&format!("?vid={vid}"));
+        }
+        let d = self
+            .http
+            .get(&url)
+            .header("Accept", "application/json")
+            .timeout(6)
+            .send()
+            .ok()?
+            .json::<serde_json::Value>()
+            .ok()?;
+        let arr = d["urls"].as_array()?;
+        let mut best: Option<(u32, String)> = None;
+        for u in arr {
+            if let Some(l) = u["label"].as_str() {
+                if let Ok(n) = l.trim().trim_end_matches('p').trim().parse::<u32>() {
+                    if best.as_ref().map(|(bn, _)| n > *bn).unwrap_or(true) {
+                        best = Some((n, l.trim().to_string()));
+                    }
+                }
+            }
+        }
+        best.map(|(_, l)| l)
+    }
+    /// tau-video embed adresindeki tüm kalite seçeneklerini döner: `[("1080p", "http://..."), ("720p", "..."), ...]`.
+    pub fn embed_quality_list(&self, embed_url: &str) -> Vec<(String, String)> {
+        let Some((embed_id, vid)) = parse_tau_embed(embed_url) else {
+            return Vec::new();
+        };
+        let mut url = format!("{TAU}/api/video/{embed_id}");
+        if !vid.is_empty() {
+            url.push_str(&format!("?vid={vid}"));
+        }
+        let Ok(resp) = self
+            .http
+            .get(&url)
+            .header("Accept", "application/json")
+            .timeout(6)
+            .send()
+        else {
+            return Vec::new();
+        };
+        let Ok(d) = resp.json::<serde_json::Value>() else {
+            return Vec::new();
+        };
+        let Some(arr) = d["urls"].as_array() else {
+            return Vec::new();
+        };
+        let mut list = Vec::new();
+        for u in arr {
+            if let (Some(l), Some(uu)) = (u["label"].as_str(), u["url"].as_str()) {
+                let label = l.trim().to_string();
+                if !label.is_empty() && !uu.is_empty() {
+                    list.push((label, uu.to_string()));
+                }
+            }
+        }
+        list.sort_by(|a, b| {
+            let num_a = a.0.trim_end_matches('p').parse::<u32>().unwrap_or(0);
+            let num_b = b.0.trim_end_matches('p').parse::<u32>().unwrap_or(0);
+            num_b.cmp(&num_a)
+        });
+        list
     }
 
     pub fn list_fansubs(&self, title_id: u64, episode: u64, season: u64) -> Result<Vec<FansubInfo>, String> {
@@ -2558,6 +3421,11 @@ impl Client {
                 changed = true;
             }
         }
+        for mh in &mut st.manga_history {
+            if self.hydrate_title(&mut mh.title) {
+                changed = true;
+            }
+        }
         if changed {
             self.save_state(&st);
         }
@@ -2660,6 +3528,21 @@ impl Client {
                 }
             }
         }
+
+        // Manga okuma konumu (ayrı alan — anime geçmişiyle karışmaz).
+        if let Some(mh) = obj.get("manga_history") {
+            if let Some(arr) = mh.as_array() {
+                for it in arr {
+                    if let Ok(mut entry) = serde_json::from_value::<MangaHistory>(it.clone()) {
+                        // Eski yerel kayıtlar saniye, MangaCiX date alanı ms.
+                        if (1_000_000_000..1_000_000_000_000).contains(&entry.ts) {
+                            entry.ts *= 1_000;
+                        }
+                        st.manga_history.push(entry);
+                    }
+                }
+            }
+        }
         if let Some(m) = obj.get("marathon") {
             if let Some(arr) = m.as_array() {
                 for it in arr {
@@ -2737,7 +3620,7 @@ impl Client {
             return changed;
         }
         if t.name.is_empty() {
-            if let Ok(results) = self.search(&t.id.to_string()) {
+            if let Ok(results) = self.search(&t.id.to_string(), false) {
                 if let Some(src) = results.into_iter().find(|x| x.id == t.id) {
                     t.name = src.name;
                     if t.poster.is_none() {
@@ -3079,6 +3962,19 @@ impl Client {
         self.save_state(&st);
     }
 
+    pub fn is_welcome_seen(&self) -> bool {
+        self.load_settings().welcome_seen || self.load_state().welcome_seen
+    }
+
+    pub fn set_welcome_seen(&self, seen: bool) {
+        let mut set = self.load_settings();
+        set.welcome_seen = seen;
+        self.save_settings(&set);
+
+        let mut st = self.load_state();
+        st.welcome_seen = seen;
+        self.save_state(&st);
+    }
 
     pub fn settings_path() -> PathBuf {
         let mut p = dirs_cache_or_home();
@@ -3087,7 +3983,8 @@ impl Client {
     }
 
     pub fn source_host_hint(url: &str) -> &'static str {
-        if url.contains("tau-video") { "tau-video" }
+        if url.starts_with('/') { "yerel" }
+        else if url.contains("tau-video") { "tau-video" }
         else if url.contains("sibnet.ru") { "sibnet.ru" }
         else if url.contains("streamtape") { "streamtape" }
         else if url.contains("vudeo") { "vudeo" }
@@ -3119,6 +4016,16 @@ impl Client {
             .unwrap_or_default()
     }
 
+    /// Ayarları `Client` kurulmadan okur. Açılışta, GTK başlatılmadan
+    /// önce gerekiyor (GSK_RENDERER ortam değişkeni olarak verilmeli).
+    pub fn read_settings() -> Settings {
+        let p = Self::settings_path();
+        std::fs::read_to_string(&p)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
     pub fn save_settings(&self, s: &Settings) {
         let p = Self::settings_path();
         if let Some(parent) = p.parent() {
@@ -3135,35 +4042,66 @@ impl Client {
         let st = State::default();
         self.save_state(&st);
         self.save_settings(&Settings::default());
+    }
 
-        let mut cache_dir = dirs_cache_or_home();
-        cache_dir.push(".cache/animecix");
-        let _ = std::fs::remove_dir_all(&cache_dir);
-        let _ = std::fs::create_dir_all(&cache_dir);
-
-        if let Ok(entries) = std::fs::read_dir("/tmp") {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                if name.to_string_lossy().starts_with("animecix-") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
+    /// MangaCiX'te geçmiş silme ucu yok (4 uç denendi, hepsi HTML döndü).
+    /// Bu yüzden "sil" yerel bir GİZLEME listesine yazılır ve sunucudan
+    /// gelen kayıtlar filtrelenerek gizlenir. Kayıt yine de sunucuda durur.
+    pub fn hide_manga_history_items(&self, title_ids: &[u64]) {
+        let mut st = self.load_state();
+        for id in title_ids {
+            if !st.manga_history_hidden.contains(id) {
+                st.manga_history_hidden.push(*id);
             }
         }
-    }
-
-    pub fn is_welcome_seen(&self) -> bool {
-        self.load_settings().welcome_seen || self.load_state().welcome_seen
-    }
-
-    pub fn set_welcome_seen(&self, seen: bool) {
-        let mut set = self.load_settings();
-        set.welcome_seen = seen;
-        self.save_settings(&set);
-
-        let mut st = self.load_state();
-        st.welcome_seen = seen;
+        if st.manga_history_hidden.len() > 500 {
+            let excess = st.manga_history_hidden.len() - 500;
+            st.manga_history_hidden.drain(0..excess);
+        }
         self.save_state(&st);
     }
+
+    pub fn clear_manga_history_hide(&self) {
+        let mut st = self.load_state();
+        st.manga_history_hidden.clear();
+        self.save_state(&st);
+    }
+
+    /// Okuma konumunu YEREL yedek olarak kaydeder ve sunucu tarihini izler.
+    /// Anime geçmişiyle ayrı alanda (`manga_history`) tutulur.
+    pub fn add_manga_history(&self, t: &Title, ch_idx: usize, ch_label: &str, page: usize) {
+        let mut st = self.load_state();
+        st.manga_history.retain(|h| h.title.id != t.id);
+        st.manga_history.insert(
+            0,
+            MangaHistory {
+                title: t.clone(),
+                name: t.name.clone(),
+                poster: t.poster.clone(),
+                chapter_label: ch_label.to_string(),
+                chapter_idx: ch_idx,
+                chapter_number: ch_label
+                    .split_whitespace()
+                    .next()
+                    .and_then(|n| n.trim_end_matches('.').parse::<f64>().ok())
+                    .unwrap_or(0.0),
+                page,
+                ts: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0),
+            },
+        );
+        if st.manga_history.len() > 60 {
+            st.manga_history.truncate(60);
+        }
+        self.save_state(&st);
+    }
+
+    pub fn load_manga_history(&self) -> Vec<MangaHistory> {
+        self.load_state().manga_history
+    }
+
 
     pub fn is_quick_search_tip_seen(&self) -> bool {
         self.load_state().quick_search_tip_seen
@@ -3334,7 +4272,156 @@ fn dirs_cache_or_home() -> PathBuf {
 mod tests {
     use super::*;
 
+    /// `put-title` gövdesi yeni manga için web istemcisinin gördüğü
+    /// `episodes: [tam bölüm]` biçimini kullanmalıdır. `videos` yalnız anime
+    /// geçmişi içindir; burada boş kalır.
+    #[test]
+    fn manga_history_put_body_matches_web_shape() {
+        let title = Title {
+            id: 12612,
+            name: "Yeni Manga".into(),
+            title_type: Some("manhwa".into()),
+            poster: Some("https://cdn.example/cover.jpg".into()),
+            raw_title: Some(serde_json::json!({
+                "id": 12612,
+                "name": "Ham Başlık",
+                "title_type": "manhwa",
+                "mal_vote_average": 8.4,
+                "keywords": [{"display_name": "Fantastik"}],
+                "episodes": [{"id": 999}],
+                "episode_images": [{"episode_id": 999}],
+                "videos": [{"episode_num": 99}],
+                "season": {"id": 99},
+                "seasons": [{"id": 99}]
+            })),
+            ..Title::minimal(12612, "Yeni Manga")
+        };
+        let chapter = MangaChapter {
+            id: 901,
+            number: 1.5,
+            name: "Ara Bölüm".into(),
+            translator: "GachaFlex".into(),
+            release_date: "2026-09-30".into(),
+            page_count: 2,
+            raw_episode: Some(serde_json::json!({
+                "_id": "mongo-episode",
+                "id": 901,
+                "title_id": 12612,
+                "episode_number": 1.5,
+                "name": "Ara Bölüm",
+                "translators": [{"translatorDetails": {"translator": "GachaFlex"}}],
+                "credits": "Altyazı"
+            })),
+        };
+
+        let body = Client::manga_history_put_body(&title, &chapter, 1_770_000_000_000);
+        assert_eq!(body["id"], 12612);
+        assert_eq!(body["name"], "Ham Başlık");
+        assert_eq!(body["title_type"], "manhwa");
+        assert_eq!(body["mal_vote_average"], 8.4);
+        assert_eq!(body["season"], serde_json::Value::Null);
+        assert_eq!(body["seasons"], serde_json::Value::Null);
+        assert_eq!(body["videos"], serde_json::json!([]));
+        assert_eq!(body["episode_images"], serde_json::json!([]));
+        assert_eq!(body["date"], 1_770_000_000_000_u64);
+
+        let episodes = body["episodes"].as_array().expect("episodes dizi olmalı");
+        assert_eq!(episodes.len(), 1);
+        assert_eq!(episodes[0]["_id"], "mongo-episode");
+        assert_eq!(episodes[0]["id"], 901);
+        assert_eq!(episodes[0]["title_id"], 12612);
+        assert_eq!(episodes[0]["episode_number"], 1.5);
+        assert_eq!(
+            episodes[0]["translators"][0]["translatorDetails"]["translator"],
+            "GachaFlex"
+        );
+        assert_eq!(episodes[0]["credits"], "Altyazı");
+    }
+
+    #[test]
+    fn manga_history_put_body_builds_minimal_episode_without_snapshots() {
+        let title = Title::minimal(12, "Minimal Manga");
+        let chapter = MangaChapter {
+            id: 44,
+            number: 2.25,
+            name: "1-1".into(),
+            release_date: "2026-09-30".into(),
+            ..Default::default()
+        };
+        let body = Client::manga_history_put_body(&title, &chapter, 42);
+        assert_eq!(body["name"], "Minimal Manga");
+        assert_eq!(body["title_type"], "manga");
+        assert_eq!(body["season"], serde_json::Value::Null);
+        assert_eq!(body["seasons"], serde_json::Value::Null);
+        assert_eq!(body["videos"], serde_json::json!([]));
+        assert_eq!(body["episode_images"], serde_json::json!([]));
+        assert_eq!(body["episodes"][0]["id"], 44);
+        assert_eq!(body["episodes"][0]["title_id"], 12);
+        assert_eq!(body["episodes"][0]["episode_number"], 2.25);
+        assert_eq!(body["episodes"][0]["name"], "1-1");
+        assert_eq!(body["episodes"][0]["release_date"], "2026-09-30");
+        assert_eq!(body["date"], 42);
+    }
+
     static STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// MangaCiX keşfet sorgusu: gerçek parametre adları + birleştirme
+    /// kuralları. `type=` (yok sayılan) ve ham boşluklu slug'lar regresyon.
+    #[test]
+    fn manga_query_uses_title_type_and_encoded_slugs() {
+        let f = MangaDiscoverFilter {
+            title_types: vec!["manhwa".into(), "manhua".into()],
+            genres: vec!["drama".into(), "romance".into()],
+            keywords: vec!["slice%20of%20life".into()],
+            order: Some("created_at:desc".into()),
+            page: 3,
+        };
+        assert_eq!(
+            Client::manga_query(&f),
+            "title_type=manhwa,manhua&genre=drama,romance&keyword=slice%20of%20life\
+             &order=created_at:desc&page=3&perPage=40"
+        );
+        // Filtresiz: yalnız sıralama + sayfalama.
+        let bos = MangaDiscoverFilter {
+            order: Some("views:desc".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            Client::manga_query(&bos),
+            "order=views:desc&page=1&perPage=40"
+        );
+        // Listelerdeki her slug sunucunun kabul ettiği biçimde mi?
+        for (_, slug) in MANGA_DISCOVER_GENRES
+            .iter()
+            .chain(MANGA_DISCOVER_KEYWORDS.iter())
+        {
+            assert!(
+                !slug.contains(' '),
+                "slug uzay içeriyor, %20 gerekir: {slug}"
+            );
+            assert!(!slug.contains('+'));
+        }
+        for (label, value) in MANGA_DISCOVER_ORDERS {
+            assert!(!label.is_empty() && value.contains(':') || *value == "name");
+        }
+    }
+
+    #[test]
+    fn test_manga_reading_modes_serde_and_labels() {
+        assert_eq!(MangaReadingMode::default(), MangaReadingMode::RightToLeft);
+        for m in MangaReadingMode::ALL {
+            let json = serde_json::to_string(&m).unwrap();
+            let de: MangaReadingMode = serde_json::from_str(&json).unwrap();
+            assert_eq!(m, de);
+            assert!(!m.label().is_empty());
+            assert!(!m.icon_name().is_empty());
+        }
+        let s = Settings::default();
+        assert_eq!(s.manga_reading_mode, MangaReadingMode::RightToLeft);
+        let s_json = serde_json::to_string(&s).unwrap();
+        let s_de: Settings = serde_json::from_str(&s_json).unwrap();
+        assert_eq!(s_de.manga_reading_mode, MangaReadingMode::RightToLeft);
+    }
 
 
     fn use_isolated_state() {
@@ -3411,6 +4498,140 @@ mod tests {
         let title = Title::from_value(&t).expect("related parse edilmeli");
         assert_eq!(title.id, 7817);
         assert_eq!(title.rating, Some(8.7));
+    }
+
+    #[test]
+    fn manga_kayitlari_baslik_olmaz() {
+        // Aynı hesap altındaki MangaciX manga kayıtları geçmiş ve
+        // watchlist uçlarından `title_type` BOŞ geliyor. AnimeciX'in
+        // kendi uçlarında alan dolu olduğu için boşluk güvenilir işaret.
+        let manga = serde_json::json!({
+            "id": 12565, "name": "Banya", "type": null, "model_type": null,
+            "poster": null, "genres": [{"name": "Manga"}]
+        });
+        assert!(
+            Title::from_value(&manga).is_none(),
+            "manga kaydı başlığa dönüşmemeli"
+        );
+        // Film ve anime geçmeli.
+        for tt in ["anime", "movie"] {
+            let ok = serde_json::json!({
+                "id": 7, "name": "Ornek", "title_type": tt, "year": 2020
+            });
+            assert!(Title::from_value(&ok).is_some(), "{tt} kabul edilmeli");
+        }
+    }
+
+    #[test]
+    fn manga_gecmis_kaydi_cozulur() {
+        // REGRESYON: MangaCiX `history/get-titles` kayıtları `title_type`
+        // BOŞ gelir. `Title::from_value` (anime|movie filtresi) bunları
+        // elerdi ve sunucudan HİÇBİR kayıt dönmezdi; geçmiş sadece yerel
+        // dosyada görünürdü. `from_value_lenient` kabul etmeli.
+        let rec = serde_json::json!({
+            "id": 4242,
+            "name": "Super Dragon Bros Z",
+            "title_type": "",
+            "poster": "https://cdn.mangacix.net/z.jpg",
+            "genres": [{"name": "Manga"}],
+            "videos": [{"episode_num": 7}]
+        });
+        let t = Title::from_value_lenient(&rec).expect("manga geçmiş kaydı çözülmeli");
+        assert_eq!(t.id, 4242);
+        assert_eq!(t.name, "Super Dragon Bros Z");
+ assert!(t.title_type.is_none(), "manga kaydında tür boş kalmalı");
+
+        // Tür filtresi: anime/movie kaydı manga geçmişine girmemeli.
+        for tt in ["anime", "movie"] {
+            let r = serde_json::json!({ "id": 1, "name": "x", "title_type": tt });
+            let is_manga = r["title_type"].as_str().unwrap_or("").is_empty()
+                || ["manga", "manhwa", "manhua", "novel"]
+                    .contains(&r["title_type"].as_str().unwrap_or(""));
+            assert!(!is_manga, "{tt} manga geçmişine girmemeli");
+        }
+    }
+
+    #[test]
+    /// MangaCiX katalog kaydında `genres` boş, türler `keywords` içinde.
+    /// Ayrılmazsa keşfet kartlarının alt satırı hiç oluşmuyor.
+    #[test]
+    fn manga_kayitinda_tur_seridi_keywords_gelir() {
+        let rec = serde_json::json!({
+            "id": 9030,
+            "name": "Chainsaw Man",
+            "title_type": "manga",
+            "genres": [],
+            "keywords": [
+                {"name": "action", "display_name": "Action"},
+                {"name": "drama", "display_name": "Drama"},
+                {"name": "horror", "display_name": "Horror"}
+            ]
+        });
+        let t = Title::from_value_lenient(&rec).unwrap();
+        let line = t.genre_line().expect("tür şeridi dolu olmalı");
+        assert!(line.contains("Aksiyon"), "Türkçe etiket: {line}");
+        assert!(line.contains("Dram"), "Türkçe etiket: {line}");
+        // İlk 6 ile sınırlı: 55 etiketli kayıtta kart taşmasın.
+        let cok = serde_json::json!({
+            "id": 1, "name": "x", "title_type": "manga",
+            "keywords": (0..20).map(|i| serde_json::json!({"name": format!("k{i}")})).collect::<Vec<_>>()
+        });
+        assert_eq!(Title::from_value_lenient(&cok).unwrap().genre_chips().len(), 6);
+    }
+
+
+    #[test]
+    fn manga_gecmis_bolum_numarasi_cozulur() {
+        // "Kaldığın Yerden Devam Et" kartı sunucudan gelen kayıtlarda bölüm
+        // DİZİNİ değil etiket taşır ("7. Bölüm" / "1.00 · Bölüm Adı").
+        // `resume_manga` bu etiketten numarayı çıkarıp gerçek bölümü
+        // arıyor; biçim burada sabitleniyor.
+        let cases = [
+            ("7. Bölüm", Some(7.0)),
+            ("12. Bölüm", Some(12.0)),
+            ("1.00 · İlk Bölüm", Some(1.0)),
+            ("", None),
+            ("Bölüm", None),
+        ];
+        for (label, want) in cases {
+            let got = label
+                .split_whitespace()
+                .next()
+                .and_then(|n| n.trim_end_matches('.').parse::<f64>().ok());
+            assert_eq!(got, want, "etiket: {label:?}");
+        }
+    }
+    #[test]
+    fn manga_gecmis_yerel_ayri_alan() {
+        // Yerel `manga_history` alanı ağ kapalıyken de kaldığın yeri korur;
+        // sunucu kaydı başarılı olmadığında kayıp yaşanmaz.
+        //
+        // Kritik: anime geçmişi `history` alanında, manga `manga_history`
+        // alanında — iki mod ASLA aynı listeyi kullanmamalı.
+        let _g = STATE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("animecix-manga-hist-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).ok();
+        // state.json yoksa `state_path()` eski konuma düşüyor; dosyayı
+        // önceden oluştur ki test gerçek state'i görmesin.
+        std::fs::write(dir.join("state.json"), "{}").ok();
+        std::env::set_var("ANIMECIX_STATE_DIR", &dir);
+
+        let c = Client::new();
+        let t = Title { id: 42, name: "Test Manga".into(), ..Default::default() };
+        c.add_manga_history(&t, 3, "3.00 · Üçüncü", 7);
+
+        let manga = c.load_manga_history();
+        assert_eq!(manga.len(), 1, "manga kaydı yazılmalı");
+        assert_eq!(manga[0].title.id, 42);
+        assert_eq!(manga[0].chapter_idx, 3);
+        assert_eq!(manga[0].page, 7);
+
+        // Anime geçmişi ayrı alanda kalmalı — manga kaydı oraya sızmamalı.
+        assert!(
+            c.load_state().history.is_empty(),
+            "manga kaydı anime geçmişine karışmamalı"
+        );
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -3662,7 +4883,6 @@ mod tests {
         assert_eq!(back.title.meta_line(), "2000  •  Film");
     }
 
-    #[test]
     #[test]
     fn settings_source_patience_roundtrips() {
         let mut s = Settings::default();
@@ -3984,7 +5204,7 @@ mod live_tests {
     #[ignore]
     fn search_live() {
         let c = Client::new();
-        let r = c.search("one piece").expect("search basarisiz");
+        let r = c.search("one piece", false).expect("search basarisiz");
         println!("sonuc: {}", r.len());
         assert!(!r.is_empty());
     }

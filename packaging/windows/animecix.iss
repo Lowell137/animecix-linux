@@ -5,7 +5,7 @@
 ; Gereksinim: MSYS2 UCRT64 runtime (libgtk-4, libadwaita, libmpv).
 
 #define MyAppName "AnimeciX"
-#define MyAppVersion "1.3.1"
+#define MyAppVersion "1.3.6"
 #define MyAppPublisher "Lowell137"
 #define MyAppURL "https://github.com/Lowell137/animecix-linux"
 #define MyAppExeName "animecix.exe"
@@ -23,7 +23,7 @@ DefaultGroupName=AnimeciX
 DisableProgramGroupPage=yes
 LicenseFile=..\..\LICENSE
 OutputDir=..\..\dist
-OutputBaseFilename=AnimeciX-1.3.1-Windows-x86_64-Setup
+OutputBaseFilename=AnimeciX-1.3.6-Windows-x86_64-Setup
 Compression=lzma2/max
 SolidCompression=yes
 ArchitecturesAllowed=x64compatible
@@ -32,7 +32,7 @@ PrivilegesRequired=lowest
 WizardStyle=modern
 SetupIconFile=animecix.ico
 UninstallDisplayIcon={app}\animecix.ico
-UninstallDisplayName=AnimeciX 1.3.1 (Windows port)
+UninstallDisplayName=AnimeciX 1.3.6 (Windows port)
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"

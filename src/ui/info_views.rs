@@ -8,7 +8,7 @@ use crate::api::{
     fmt_tr_time,
 };
 
-/// Bölüm başlığı (örn. "🆕 SON EKLENEN BÖLÜMLER") + sağda opsiyonel "Tümü".
+/// Bölüm başlığı (örn. "SON EKLENEN BÖLÜMLER") + sağda opsiyonel "Tümü".
 fn rail_head(title_text: &str) -> (gtk::Box, gtk::Label) {
     let head = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     head.set_hexpand(true);
@@ -47,6 +47,7 @@ pub fn poster_card(
     let overlay = gtk::Overlay::new();
     overlay.add_css_class("poster-lift");
     overlay.set_size_request(140, 210);
+    overlay.set_halign(gtk::Align::Center);
     let pic = crate::covers::new_sized_picture(140, 210);
     pic.set_halign(gtk::Align::Center);
     pic.set_can_shrink(false);
@@ -64,11 +65,11 @@ pub fn poster_card(
         b.set_size_request(34, 34);
         b.set_halign(gtk::Align::Start);
         b.set_valign(gtk::Align::Start);
-        b.set_margin_top(6);
-        b.set_margin_start(6);
+        b.set_margin_top(10);
+        b.set_margin_start(10);
         b.set_visible(false);
         b.set_tooltip_text(Some(if member {
-            "Maratonda ✓ (çıkarmak için tıkla)"
+            "Maratonda (çıkarmak için tıkla)"
         } else {
             "Maratona ekle"
         }));
@@ -81,7 +82,7 @@ pub fn poster_card(
                 "list-add-symbolic"
             });
             b_c.set_tooltip_text(Some(if added {
-                "Maratonda ✓ (çıkarmak için tıkla)"
+                "Maratonda (çıkarmak için tıkla)"
             } else {
                 "Maratona ekle"
             }));
@@ -104,7 +105,8 @@ pub fn poster_card(
     name.add_css_class("card-title");
     name.set_wrap(false);
     name.set_single_line_mode(true);
-    name.set_max_width_chars(16);
+    name.set_max_width_chars(13);
+    name.set_size_request(138, -1);
     name.set_lines(1);
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     card.append(&name);
@@ -118,7 +120,8 @@ pub fn poster_card(
     sub_lbl.set_wrap(false);
     sub_lbl.set_single_line_mode(true);
     sub_lbl.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    sub_lbl.set_max_width_chars(18);
+    sub_lbl.set_max_width_chars(13);
+    sub_lbl.set_size_request(138, -1);
     card.append(&sub_lbl);
 
     // Hover'da maraton butonunu göster/gizle.
@@ -180,7 +183,7 @@ pub fn credits_strip(
     root.set_hexpand(true);
     root.set_halign(gtk::Align::Fill);
     root.set_margin_top(12);
-    let (head, _) = rail_head("🎭 OYUNCULAR & EKİP");
+    let (head, _) = rail_head("OYUNCULAR & EKİP");
     root.append(&head);
 
     let scroll = gtk::ScrolledWindow::new();
@@ -266,7 +269,8 @@ fn review_row(
     user.set_hexpand(true);
     head.append(&user);
     if r.score > 0.0 {
-        let score = gtk::Label::new(Some(&format!("★ {}", trim_score(r.score))));
+        let (score, _, _) =
+            crate::ui::components::status_label("starred-symbolic", &trim_score(r.score));
         score.add_css_class("status-badge-progress");
         head.append(&score);
     }
@@ -307,9 +311,9 @@ pub fn reviews_preview(
     root.set_halign(gtk::Align::Fill);
     root.set_margin_top(12);
     let (head, _) = rail_head(&if total > 0 {
-        format!("⭐ İNCELEMELER ({total})")
+        format!("İNCELEMELER ({total})")
     } else {
-        "⭐ İNCELEMELER".to_string()
+        "İNCELEMELER".to_string()
     });
     let all_btn = gtk::Button::with_label("Tümü ›");
     all_btn.add_css_class("flat");

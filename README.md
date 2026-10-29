@@ -1,4 +1,4 @@
-# AnimeciX
+# AnimeciX/Mangacix
 
 [![Sürümler](https://img.shields.io/github/v/release/Lowell137/animecix-linux?style=flat-square)](https://github.com/Lowell137/animecix-linux/releases/latest)
 [![Lisans: MIT](https://img.shields.io/github/license/Lowell137/animecix-linux?style=flat-square)](LICENSE)
@@ -65,6 +65,19 @@ curl -L https://github.com/Lowell137/animecix-linux/releases/latest/download/Ani
 ```
 
 *(Fedora veya modern Ubuntu'da FUSE uyarısı alırsanız `./AnimeciX.AppImage --appimage-extract-and-run` parametresiyle açabilirsiniz).*
+
+### 4. Windows 11 Kurulumu (Inno Setup)
+[Sürümler](https://github.com/Lowell137/animecix-linux/releases/latest) sayfasından **`AnimeciX-1.3.1-Windows-x86_64-Setup.exe`** dosyasını indirip çalıştırın.
+
+Ön gereksinim (MSYS2 UCRT64 runtime):
+1. [MSYS2](https://www.msys2.org) kurun.
+2. UCRT64 terminalde çalıştırın:
+```bash
+pacman -S mingw-w64-ucrt-x86_64-gtk4 mingw-w64-ucrt-x86_64-libadwaita mingw-w64-ucrt-x86_64-mpv
+```
+3. Kurulum sonrası Başlat menüsünden **AnimeciX** öğesini açın.
+
+> Windows portu kaynak kodu `windows-port` dalındadır (`packaging/windows/animecix.iss`). Linux `main` dalı değiştirilmeden korunur.
 
 ---
 

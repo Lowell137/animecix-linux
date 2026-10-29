@@ -278,20 +278,14 @@ pub fn build_installer_ui(parent_window: &adw::ApplicationWindow) -> gtk::Box {
             for (pkg, status) in &res.packages {
                 let row = adw::ActionRow::new();
                 row.set_title(pkg);
-                match status {
-                    PackageStatus::Installed => {
-                        row.set_subtitle("✓ Kurulu");
-                        row.add_css_class("dim-label");
-                    }
-                    PackageStatus::Missing => {
-                        row.set_subtitle("✗ Eksik");
-                        row.add_css_class("error");
-                    }
-                    PackageStatus::Unknown => {
-                        row.set_subtitle("? Bilinmiyor");
-                        row.add_css_class("dim-label");
-                    }
-                }
+                let (icon, txt, cls) = match status {
+                    PackageStatus::Installed => ("object-select-symbolic", "Kuruldu", "success"),
+                    PackageStatus::Missing => ("dialog-error-symbolic", "Eksik", "error"),
+                    PackageStatus::Unknown => ("dialog-warning-symbolic", "Bilinmiyor", "dim-label"),
+                };
+                let (badge, _, _) = crate::ui::components::status_label(icon, txt);
+                badge.add_css_class(cls);
+                row.add_suffix(&badge);
                 list_box.append(&row);
             }
         }
